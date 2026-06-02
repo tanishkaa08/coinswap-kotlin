@@ -17,6 +17,8 @@ import com.example.coinswapmobile.screens.MarketsScreen
 import com.example.coinswapmobile.screens.RecoveryScreen
 import com.example.coinswapmobile.screens.SettingsScreen
 import com.example.coinswapmobile.screens.SwapScreen
+import com.example.coinswapmobile.screens.SendScreen
+import com.example.coinswapmobile.screens.ReceiveScreen
 import com.example.coinswapmobile.ui.theme.Background
 import com.example.coinswapmobile.ui.theme.Surface
 import com.example.coinswapmobile.ui.theme.TextSecondary
@@ -79,13 +81,17 @@ fun CoinSwapNavGraph(startWithRecovery: Boolean = false) {
             navController    = navController,
             startDestination = if (startWithRecovery) "recovery" else Screen.Home.route,
             modifier         = Modifier.padding(innerPadding)
+
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
-                    onSendClick    = { },
-                    onReceiveClick = { }
+                    onSendClick    = { navController.navigate("send") },
+                    onReceiveClick = { navController.navigate("receive") }
                 )
             }
+            composable("send")    { SendScreen(onBack = { navController.popBackStack() }) }
+
+            composable("receive") { ReceiveScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.Markets.route)  { MarketsScreen() }
             composable(Screen.Swap.route)     { SwapScreen() }
             composable(Screen.Settings.route) { SettingsScreen() }

@@ -1,4 +1,4 @@
-package com.example.coinswapmobile.components
+package com.example.coinswapmobile.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*

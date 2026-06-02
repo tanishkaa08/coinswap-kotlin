@@ -1,4 +1,4 @@
-package com.example.coinswapmobile.components
+package com.example.coinswapmobile.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.coinswapmobile.ui.theme.*
 
-// How many privacy dots a UTXO has (1 = low, 5 = high)
 enum class PrivacyLevel(val dots: Int, val color: Color, val label: String) {
     LOW(1,  TorInactive,  "EXPOSED"),
     MED(3,  AccentPurple, "MIXED"),
@@ -22,8 +21,8 @@ enum class PrivacyLevel(val dots: Int, val color: Color, val label: String) {
 }
 
 data class UtxoItem(
-    val address: String,         // truncated, e.g. "bc1q...xµ3"
-    val amountBtc: String,       // e.g. "0.0450 BTC"
+    val address: String,
+    val amountBtc: String,
     val privacyLevel: PrivacyLevel
 )
 
@@ -44,18 +43,16 @@ fun UtxoCard(utxo: UtxoItem) {
                 color = TextPrimary
             )
             Spacer(Modifier.height(4.dp))
-            // Privacy dots row
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically) {
                 repeat(5) { i ->
                     Box(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
                             .background(
-                                if (i < utxo.privacyLevel.dots)
-                                    utxo.privacyLevel.color
-                                else
-                                    Divider
+                                if (i < utxo.privacyLevel.dots) utxo.privacyLevel.color
+                                else Divider
                             )
                     )
                 }
