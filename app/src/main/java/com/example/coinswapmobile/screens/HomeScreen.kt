@@ -20,10 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.example.coinswapmobile.components.PrivacyLevel
-import com.example.coinswapmobile.components.TorStatusBadge
-import com.example.coinswapmobile.components.UtxoCard
-import com.example.coinswapmobile.components.UtxoItem
+import com.example.coinswapmobile.ui.components.PrivacyLevel
+import com.example.coinswapmobile.ui.components.TorStatusBadge
+import com.example.coinswapmobile.ui.components.UtxoCard
+import com.example.coinswapmobile.ui.components.UtxoItem
 import com.example.coinswapmobile.ui.theme.*
 
 @Composable
@@ -33,7 +33,7 @@ fun HomeScreen(
 ) {
     var balanceVisible by remember { mutableStateOf(false) }
     val torActive    = true
-    val backendLabel = "BACKEND: ELECTRUM"
+    val backendLabel = "BACKEND: ELECTRUM  •  LAST SYNC: 2 MIN AGO"
 
     val utxos = listOf(
         UtxoItem("bc1q...xµ3", "0.0450 BTC", PrivacyLevel.HIGH),
@@ -42,70 +42,68 @@ fun HomeScreen(
     )
 
     LazyColumn(
-        modifier            = Modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        contentPadding      = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Top bar
         item {
             Row(
-                modifier          = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text  = "COINSWAP",
+                Text("COINSWAP",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TorActive
-                )
+                    color = TorActive)
                 Spacer(Modifier.weight(1f))
                 TorStatusBadge(isActive = torActive)
             }
         }
 
-        // Backend badge
         item {
-            Text(
-                text  = backendLabel,
+            Text(backendLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
+                color = TextSecondary)
         }
 
         // Balance card
         item {
             Column(
-                modifier            = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Surface)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text  = "TOTAL BALANCE",
+                Text("TOTAL BALANCE",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
-                )
-                Spacer(Modifier.height(8.dp))
+                    color = TextSecondary)
+
                 AnimatedContent(
-                    targetState  = balanceVisible,
+                    targetState = balanceVisible,
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label        = "balance"
+                    label = "balance"
                 ) { visible ->
                     Text(
-                        text  = if (visible) "0.1245 BTC" else "••••••",
+                        text = if (visible) "0.1245 BTC" else "●●●●●●",
                         style = MaterialTheme.typography.headlineMedium,
                         color = TextPrimary
                     )
                 }
-                Spacer(Modifier.height(8.dp))
+
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(SurfaceAlt)
                         .clickable { balanceVisible = !balanceVisible }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text  = if (balanceVisible) "Tap to hide" else "Tap to reveal",
+                        text = if (balanceVisible) "Tap to hide" else "Tap to reveal",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )
@@ -113,51 +111,68 @@ fun HomeScreen(
             }
         }
 
-        // Send / Receive buttons
+        // Send / Receive
         item {
             Row(
-                modifier              = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                ActionButton(
-                    label    = "SEND",
-                    icon     = Icons.AutoMirrored.Filled.CallMade,
-                    modifier = Modifier.weight(1f),
-                    onClick  = onSendClick
-                )
-                ActionButton(
-                    label    = "RECEIVE",
-                    icon     = Icons.AutoMirrored.Filled.CallReceived,
-                    modifier = Modifier.weight(1f),
-                    onClick  = onReceiveClick
-                )
+                ActionButton("SEND",    Icons.AutoMirrored.Filled.CallMade,     Modifier.weight(1f), onSendClick)
+                ActionButton("RECEIVE", Icons.AutoMirrored.Filled.CallReceived, Modifier.weight(1f), onReceiveClick)
             }
         }
 
         // UTXOs header
         item {
             Row(
-                modifier          = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text  = "UTXOs",
+                Text("UTXOs",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary
-                )
+                    color = TextPrimary)
                 Spacer(Modifier.weight(1f))
-                Text(
-                    text  = "Manage All",
+                Text("Manage All",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TorActive
-                )
+                    color = TorActive,
+                    modifier = Modifier.clickable { })
             }
         }
 
-        // UTXO list
-        items(utxos) { utxo ->
-            UtxoCard(utxo)
+        items(utxos) { utxo -> UtxoCard(utxo) }
+
+        // Recent transactions stub
+        item { Spacer(Modifier.height(4.dp)) }
+        item {
+            Text("RECENT TRANSACTIONS",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary)
         }
+        item { TxRow("Coinswap",  "- 0.005 BTC",  "2 hrs ago",  false) }
+        item { TxRow("Received",  "+ 0.120 BTC",  "1 day ago",  true) }
+        item { TxRow("Coinswap",  "- 0.010 BTC",  "3 days ago", false) }
+    }
+}
+
+@Composable
+private fun TxRow(label: String, amount: String, time: String, isReceive: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceAlt)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+            Text(time,  style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+        }
+        Text(
+            text  = amount,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (isReceive) TorActive else TextPrimary
+        )
     }
 }
 
