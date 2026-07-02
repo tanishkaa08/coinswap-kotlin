@@ -20,26 +20,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.ui.components.PrivacyLevel
 import com.example.coinswapmobile.ui.components.TorStatusBadge
 import com.example.coinswapmobile.ui.components.UtxoCard
 import com.example.coinswapmobile.ui.components.UtxoItem
 import com.example.coinswapmobile.ui.theme.*
+import com.example.coinswapmobile.viewmodel.WalletViewModel
 
 @Composable
 fun HomeScreen(
     onSendClick:    () -> Unit,
     onReceiveClick: () -> Unit,
+    walletViewModel: WalletViewModel = viewModel(),
 ) {
+    val uiState by walletViewModel.uiState.collectAsState()
     var balanceVisible by remember { mutableStateOf(false) }
-    val torActive    = true
-    val backendLabel = "BACKEND: ELECTRUM  •  LAST SYNC: 2 MIN AGO"
-
-    val utxos = listOf(
-        UtxoItem("bc1q...xµ3", "0.0450 BTC", PrivacyLevel.HIGH),
-        UtxoItem("bc1p...z8w", "0.0795 BTC", PrivacyLevel.MED),
-        UtxoItem("bc1q...m2k", "0.0001 BTC", PrivacyLevel.LOW),
-    )
 
     LazyColumn(
         modifier = Modifier
@@ -58,14 +55,32 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = TorActive)
                 Spacer(Modifier.weight(1f))
-                TorStatusBadge(isActive = torActive)
+                TorStatusBadge(isActive = uiState.isInitialized && uiState.error == null)
             }
         }
 
         item {
-            Text(backendLabel,
+            Text(uiState.backendLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
+        }
+
+        if (uiState.nativeStatus.isNotBlank() &&
+            (!uiState.isInitialized || uiState.error != null)
+        ) {
+            item {
+                Text(uiState.nativeStatus,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary)
+            }
+        }
+
+        uiState.error?.let { message ->
+            item {
+                Text("⚠  $message",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TorInactive)
+            }
         }
 
         // Balance card
@@ -88,11 +103,19 @@ fun HomeScreen(
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "balance"
                 ) { visible ->
-                    Text(
-                        text = if (visible) "0.1245 BTC" else "●●●●●●",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = TextPrimary
-                    )
+                    if (uiState.isLoading && uiState.balanceSats == 0L) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = TorActive,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = if (visible) "%,d sats".format(uiState.balanceSats) else "●●●●●●",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = TextPrimary
+                        )
+                    }
                 }
 
                 Box(
@@ -132,48 +155,51 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary)
                 Spacer(Modifier.weight(1f))
-                Text("Manage All",
+                Text(if (uiState.isLoading) "Syncing…" else "Sync",
                     style = MaterialTheme.typography.labelSmall,
                     color = TorActive,
-                    modifier = Modifier.clickable { })
+                    modifier = Modifier.clickable { walletViewModel.syncWallet() })
             }
         }
 
-        items(utxos) { utxo -> UtxoCard(utxo) }
+        if (uiState.utxos.isEmpty() && !uiState.isLoading) {
+            item {
+                Text("No UTXOs yet, fund your receive address to see coins here.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary)
+            }
+        } else {
+            items(uiState.utxos) { utxo -> UtxoCard(utxo.toUtxoItem()) }
+        }
 
-        // Recent transactions stub
+        // Recent transactions — Electrum history is not exposed yet (see PR #874 notes)
         item { Spacer(Modifier.height(4.dp)) }
         item {
             Text("RECENT TRANSACTIONS",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
         }
-        item { TxRow("Coinswap",  "- 0.005 BTC",  "2 hrs ago",  false) }
-        item { TxRow("Received",  "+ 0.120 BTC",  "1 day ago",  true) }
-        item { TxRow("Coinswap",  "- 0.010 BTC",  "3 days ago", false) }
+        item {
+            Text("Transaction history is not available on the Electrum backend yet.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary)
+        }
     }
 }
 
-@Composable
-private fun TxRow(label: String, amount: String, time: String, isReceive: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(SurfaceAlt)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-            Text(time,  style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-        }
-        Text(
-            text  = amount,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (isReceive) TorActive else TextPrimary
-        )
+/** Maps a wallet UTXO to the existing UtxoCard model, deriving a privacy level from confirmations. */
+private fun UtxoUiModel.toUtxoItem(): UtxoItem {
+    val privacy = when {
+        (confirmations ?: 0) == 0 -> PrivacyLevel.LOW
+        (confirmations ?: 0) < 3  -> PrivacyLevel.MED
+        else                      -> PrivacyLevel.HIGH
     }
+    val shortId = if (txid.length > 8) "${txid.take(8)}…:$vout" else "$txid:$vout"
+    return UtxoItem(
+        address = shortId,
+        amountBtc = "%.8f".format(amountSats / 100_000_000.0),
+        privacyLevel = privacy,
+    )
 }
 
 @Composable

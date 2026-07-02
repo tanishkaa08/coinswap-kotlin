@@ -1,6 +1,7 @@
 package com.example.coinswapmobile.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,21 +10,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.coinswapmobile.components.SectionCard
-import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.LabeledSwitch
-import com.example.coinswapmobile.components.coinswapTextFieldColors
+import com.example.coinswapmobile.components.SectionLabel
+import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.*
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    onOpenRecovery: () -> Unit = {},
+    onLogout: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val session = remember { UserSession(context) }
+
     var decoyCount      by remember { mutableFloatStateOf(50f) }
     var rotateServers   by remember { mutableStateOf(true) }
     var broadcastRedund by remember { mutableFloatStateOf(3f) }
     var torMode         by remember { mutableStateOf(true) }
-    var backendElectrum by remember { mutableStateOf(true) }
-    var electrumServer  by remember { mutableStateOf("ssl://electrum.blockstream.info:50002") }
 
     Column(
         modifier = Modifier
@@ -37,32 +42,29 @@ fun SettingsScreen() {
             style = MaterialTheme.typography.titleMedium,
             color = TextPrimary)
 
-        // Backend
         SettingsCard {
-            SectionLabel("BACKEND")
-            LabeledSwitch(
-                label    = "Use Electrum backend",
-                subtitle = if (backendElectrum) "Electrum (no full node required)" else "Bitcoin Core RPC",
-                checked  = backendElectrum,
-                onChange = { backendElectrum = it }
-            )
-            if (backendElectrum) {
-                Spacer(Modifier.height(8.dp))
-                Text("ELECTRUM SERVER",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value         = electrumServer,
-                    onValueChange = { electrumServer = it },
-                    modifier      = Modifier.fillMaxWidth(),
-                    singleLine    = true,
-                    colors        = coinswapTextFieldColors()
-                )
+            SectionLabel("YOUR SESSION")
+            InfoRow("Backend", "Electrum")
+            InfoRow("Electrum server", session.electrumUrl)
+            InfoRow("Wallet name", session.walletName)
+            InfoRow("Logged in", if (session.isLoggedIn) "Yes" else "No")
+        }
+
+        SettingsCard {
+            SectionLabel("SWAP RECOVERY")
+            Text("Resume or inspect an incomplete swap session.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary)
+            Button(
+                onClick = onOpenRecovery,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentAmber.copy(alpha = 0.2f))
+            ) {
+                Text("Open Recovery Screen", color = AccentAmber)
             }
         }
 
-        // Tor
         SettingsCard {
             SectionLabel("TOR ROUTING")
             LabeledSwitch(
@@ -79,7 +81,6 @@ fun SettingsScreen() {
             )
         }
 
-        // Address privacy
         SettingsCard {
             SectionLabel("ADDRESS PRIVACY")
             LabeledSlider(
@@ -92,7 +93,6 @@ fun SettingsScreen() {
             )
         }
 
-        // Broadcast
         SettingsCard {
             SectionLabel("BROADCAST")
             LabeledSlider(
@@ -105,11 +105,22 @@ fun SettingsScreen() {
             )
         }
 
-        // About
+        SettingsCard {
+            SectionLabel("SESSION")
+            OutlinedButton(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, Divider)
+            ) {
+                Text("Log out", color = TextSecondary)
+            }
+        }
+
         SettingsCard {
             SectionLabel("ABOUT")
-            InfoRow("Version",  "0.1.0-alpha")
-            InfoRow("Network",  "Mutinynet (testnet)")
+            InfoRow("Version", "0.1.0-alpha")
+            InfoRow("Network", "Mutinynet (testnet)")
             InfoRow("Protocol", "Maxwell-Belcher Coinswap")
         }
     }
@@ -121,8 +132,8 @@ private fun InfoRow(label: String, value: String) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = TextSecondary, modifier = Modifier.weight(0.4f))
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = TextPrimary, modifier = Modifier.weight(0.6f))
     }
 }
 
@@ -140,31 +151,14 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-fun SectionLabel(text: String) {
-    Text(text, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-    HorizontalDivider(color = Divider, thickness = 0.5.dp)
-}
-
-@Composable
-fun LabeledSwitch(label: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label,    style = MaterialTheme.typography.bodyMedium,  color = TextPrimary)
-            Text(subtitle, style = MaterialTheme.typography.labelSmall,  color = TextSecondary)
-        }
-        Switch(
-            checked         = checked,
-            onCheckedChange = onChange,
-            colors          = SwitchDefaults.colors(
-                checkedThumbColor = TorActive,
-                checkedTrackColor = TorActive.copy(0.3f)
-            )
-        )
-    }
-}
-
-@Composable
-fun LabeledSlider(label: String, subtitle: String, value: Float, range: ClosedFloatingPointRange<Float>, display: String, onChange: (Float) -> Unit) {
+private fun LabeledSlider(
+    label: String,
+    subtitle: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    display: String,
+    onChange: (Float) -> Unit
+) {
     Column {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label,   style = MaterialTheme.typography.bodyMedium, color = TextPrimary)

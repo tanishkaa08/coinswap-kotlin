@@ -56,12 +56,6 @@ fun UtxoCard(utxo: UtxoItem) {
                             )
                     )
                 }
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text  = utxo.privacyLevel.label,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = utxo.privacyLevel.color
-                )
             }
         }
         Text(
