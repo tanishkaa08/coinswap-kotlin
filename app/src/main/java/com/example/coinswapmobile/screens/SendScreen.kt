@@ -15,23 +15,37 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
-import com.example.coinswapmobile.components.LabeledSwitch
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 
-@Composable
-fun SendScreen(onBack: () -> Unit) {
-    var address  by remember { mutableStateOf("") }
-    var amount   by remember { mutableStateOf("") }
-    var feeLevel by remember { mutableIntStateOf(1) } // 0=slow,1=medium,2=fast
+// Taker-app fee rates: low=1, medium=2, high=4 sat/vB; 225 vbytes avg tx
+private enum class SendFee(
+    val label: String,
+    val satPerVbyte: Int,
+    val timeLabel: String
+) {
+    LOW(   "Low",    1, "1 sat/vB  60 min"),
+    MEDIUM("Medium", 2, "2 sat/vB  20 min"),
+    HIGH(  "High",   4, "4 sat/vB  10 min"),
+}
+private const val SEND_TX_VBYTES = 225L
 
-    val feeSats = when (feeLevel) {
-        0    -> "1 sat/vB  ~  60+ min"
-        1    -> "5 sat/vB  ~  30 min"
-        else -> "12 sat/vB  ~  10 min"
-    }
+@Composable
+fun SendScreen(
+    onBack: () -> Unit,
+) {
+    var address  by remember { mutableStateOf("") }
+    var amountSats by remember { mutableStateOf("") }
+    var feeLevel by remember { mutableStateOf(SendFee.MEDIUM) }
+    // Send is UI-only for now — real broadcast is a follow-up (see TODO on the button).
+    var notice by remember { mutableStateOf<String?>(null) }
+
+    val amountLong   = amountSats.toLongOrNull() ?: 0L
+    val networkFee   = feeLevel.satPerVbyte * SEND_TX_VBYTES
+    val totalSats    = amountLong + networkFee
 
     Column(
         modifier = Modifier
@@ -51,12 +65,9 @@ fun SendScreen(onBack: () -> Unit) {
                 color = TextPrimary)
         }
 
-        // Address field
+        // Address
         SectionCard {
-            Text("RECIPIENT ADDRESS",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Spacer(Modifier.height(8.dp))
+            SectionLabel("RECIPIENT ADDRESS")
             OutlinedTextField(
                 value         = address,
                 onValueChange = { address = it },
@@ -67,94 +78,84 @@ fun SendScreen(onBack: () -> Unit) {
             )
         }
 
-        // Amount field
+        // Amount in sats
         SectionCard {
-            Text("AMOUNT",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Spacer(Modifier.height(8.dp))
+            SectionLabel("AMOUNT")
             OutlinedTextField(
-                value         = amount,
-                onValueChange = { amount = it },
-                placeholder   = { Text("0.00 BTC", color = TextSecondary) },
-                modifier      = Modifier.fillMaxWidth(),
-                singleLine    = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                colors        = coinswapTextFieldColors(),
-                suffix        = { Text("BTC", color = TextSecondary) }
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text  = if (amount.isNotEmpty()) "≈ ${(amount.toDoubleOrNull() ?: 0.0) * 95000} USD" else "Enter amount",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
+                value           = amountSats,
+                onValueChange   = { amountSats = it.filter { c -> c.isDigit() } },
+                placeholder     = { Text("e.g. 500000", color = TextSecondary) },
+                modifier        = Modifier.fillMaxWidth(),
+                singleLine      = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors          = coinswapTextFieldColors(),
+                suffix          = { Text("sats", color = TextSecondary) }
             )
         }
 
-        // Fee selector
+        // Network fee Low / Medium / High
         SectionCard {
-            Text("NETWORK FEE",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Spacer(Modifier.height(10.dp))
+            SectionLabel("NETWORK FEE")
+            Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("Slow", "Medium", "Fast").forEachIndexed { i, label ->
-                    val selected = feeLevel == i
-                    OutlinedButton(
-                        onClick  = { feeLevel = i },
-                        modifier = Modifier.weight(1f),
+                SendFee.entries.forEach { tier ->
+                    val sel = feeLevel == tier
+                    Button(
+                        onClick  = { feeLevel = tier },
+                        modifier = Modifier.weight(1f).height(40.dp),
                         shape    = RoundedCornerShape(8.dp),
-                        colors   = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (selected) TorActive.copy(0.15f) else SurfaceAlt,
-                            contentColor   = if (selected) TorActive else TextSecondary
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp, if (selected) TorActive else Divider
+                        contentPadding = PaddingValues(0.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = if (sel) TorActive else SurfaceAlt,
+                            contentColor   = if (sel) androidx.compose.ui.graphics.Color.Black else TextSecondary
                         )
                     ) {
-                        Text(label, style = MaterialTheme.typography.labelSmall)
+                        Text(tier.label, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-            Spacer(Modifier.height(6.dp))
-            Text(feeSats,
+            Spacer(Modifier.height(4.dp))
+            Text(feeLevel.timeLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = TorActive)
         }
 
-        // Summary
-        if (address.isNotEmpty() && amount.isNotEmpty()) {
+        // Summary — shown once both fields are filled
+        if (address.isNotEmpty() && amountLong > 0) {
             SectionCard {
-                Text("TRANSACTION SUMMARY",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-                Spacer(Modifier.height(8.dp))
-                SummaryRow("To",     address.take(20) + "...")
-                SummaryRow("Amount", "$amount BTC")
-                SummaryRow("Fee",    feeSats.substringBefore("~").trim())
+                SectionLabel("TRANSACTION SUMMARY")
+                Spacer(Modifier.height(4.dp))
+                SummaryRow("To",          address.take(22) + if (address.length > 22) "…" else "")
+                SummaryRow("Amount",      "%,d sats".format(amountLong))
+                SummaryRow("Network fee", "%,d sats".format(networkFee))
                 HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 6.dp))
-                SummaryRow(
-                    "Total",
-                    "${(amount.toDoubleOrNull() ?: 0.0) + 0.00001} BTC",
-                    highlight = true
-                )
+                SummaryRow("Total",       "%,d sats".format(totalSats), highlight = true)
             }
         }
 
         Spacer(Modifier.height(8.dp))
 
+        notice?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = AccentAmber)
+        }
+
         Button(
-            onClick  = { /* stub */ },
-            enabled  = address.isNotEmpty() && amount.isNotEmpty(),
+            onClick  = {
+                // TODO: sendBitcoin(address.trim(), amountLong, feeLevel.satPerVbyte)
+                //   Wire this to a repository call once the Electrum wallet exposes
+                //   transaction building + broadcast (coinswap PR #874 send path).
+                notice = "Sending is not enabled in this build yet."
+            },
+            enabled  = address.isNotEmpty() && amountLong > 0,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             shape    = RoundedCornerShape(12.dp),
             colors   = ButtonDefaults.buttonColors(containerColor = TorActive)
         ) {
-            Text("CONFIRM & SEND",
-                color = androidx.compose.ui.graphics.Color.Black,
+            Text("CONFIRM AND SEND",
+                color = Color.Black,
                 style = MaterialTheme.typography.titleMedium)
         }
     }
@@ -171,14 +172,14 @@ private fun SummaryRow(label: String, value: String, highlight: Boolean = false)
             color = if (highlight) TorActive else TextPrimary)
     }
 }
-// Add to SendScreen.kt bottom (or a shared file)
 
+// Local SectionCard / coinswapTextFieldColors fallbacks kept for standalone compilation
 @Composable
 fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(com.example.coinswapmobile.ui.theme.Surface)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),

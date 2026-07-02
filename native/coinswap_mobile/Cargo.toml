@@ -1,0 +1,30 @@
+[package]
+name = "coinswap_mobile"
+version = "0.1.0"
+edition = "2021"
+description = "JNI wrapper exposing coinswap PR #874's Electrum wallet to the Android app"
+
+[lib]
+# cdylib -> produces libcoinswap_mobile.so that Android loads via System.loadLibrary
+name = "coinswap_mobile"
+crate-type = ["cdylib"]
+
+[dependencies]
+# JNI boundary
+jni = "0.21"
+
+# JSON is the transport format between Rust and Kotlin.
+serde_json = "1"
+
+# Lazily-initialised global wallet handle.
+once_cell = "1"
+
+log = "0.4"
+
+# ── The actual PR #874 crate ────────────────────────────────────────────────
+# Vendor the PR branch into ../../vendor/coinswap (see native/README.md), then
+# this path dependency pulls in the real Wallet<ElectrumBackend>.
+coinswap = { path = "../../vendor/coinswap" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"

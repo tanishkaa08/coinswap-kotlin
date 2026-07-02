@@ -1,6 +1,8 @@
 package com.example.coinswapmobile.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,96 +13,253 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.ui.theme.*
+import com.example.coinswapmobile.viewmodel.MarketsViewModel
 
-data class MakerInfo(
-    val shortId:   String,
-    val feeRate:   String,
-    val minSwap:   String,
-    val maxSwap:   String,
-    val liquidity: String,
-    val online:    Boolean
-)
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MarketsScreen() {
-    val makers = listOf(
-        MakerInfo("mk1...ab3", "0.10%", "0.001 BTC", "1.000 BTC", "2.345 BTC", true),
-        MakerInfo("mk2...cd7", "0.08%", "0.005 BTC", "0.500 BTC", "1.120 BTC", true),
-        MakerInfo("mk3...ef2", "0.12%", "0.001 BTC", "2.000 BTC", "5.670 BTC", true),
-        MakerInfo("mk4...gh9", "0.15%", "0.010 BTC", "0.250 BTC", "0.890 BTC", false),
-        MakerInfo("mk5...ij4", "0.09%", "0.002 BTC", "1.500 BTC", "3.210 BTC", true),
-    )
+fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
+    val vmState      by marketsViewModel.uiState.collectAsState()
+    val makers       = vmState.makers
+    val isSyncing    = vmState.isSyncing
+    var selectedMaker by remember { mutableStateOf<SwapMaker?>(null) }
+    val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    if (selectedMaker != null) {
+        ModalBottomSheet(
+            onDismissRequest = { selectedMaker = null },
+            sheetState       = sheetState,
+            containerColor   = Surface
+        ) {
+            MakerDetailSheet(maker = selectedMaker!!, onDismiss = { selectedMaker = null })
+        }
+    }
 
     LazyColumn(
-        modifier       = Modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // ── Header ──────────────────────────────────────────────────────────
         item {
-            Text("Maker Marketplace",
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary)
-            Spacer(Modifier.height(2.dp))
-            Text("${makers.count { it.online }} makers online",
-                style = MaterialTheme.typography.labelSmall,
-                color = TorActive)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Maker Marketplace",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextPrimary)
+                    Spacer(Modifier.height(2.dp))
+                    Text("${makers.count { it.online }} of ${makers.size} makers online",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TorActive)
+                }
+            }
         }
 
-        // Column headers
+        // ── Sync button ─────────────────────────────────────────────────────
+        item {
+            Button(
+                onClick = { marketsViewModel.syncMarketplace() },
+                enabled  = !isSyncing,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape    = RoundedCornerShape(12.dp),
+                colors   = ButtonDefaults.buttonColors(containerColor = TorActive)
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(
+                        modifier    = Modifier.size(18.dp),
+                        color       = androidx.compose.ui.graphics.Color.Black,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Syncing…", color = androidx.compose.ui.graphics.Color.Black,
+                        style = MaterialTheme.typography.titleMedium)
+                } else {
+                    Text("Sync Marketplace", color = androidx.compose.ui.graphics.Color.Black,
+                        style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+
+        // ── Column headers (MAKER + FEE only) ───────────────────────────────
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                listOf("MAKER", "FEE", "MIN", "MAX", "LIQUIDITY").forEach { h ->
-                    Text(h,
-                        style    = MaterialTheme.typography.labelSmall,
-                        color    = TextSecondary,
-                        modifier = Modifier.weight(1f))
-                }
+                Text("MAKER",
+                    style    = MaterialTheme.typography.labelSmall,
+                    color    = TextSecondary,
+                    modifier = Modifier.weight(1f))
+                Text("FEE / HOP",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary)
             }
             HorizontalDivider(color = Divider, modifier = Modifier.padding(top = 6.dp))
         }
 
-        items(makers) { maker -> MakerRow(maker) }
+        // ── Maker rows ──────────────────────────────────────────────────────
+        if (makers.isEmpty()) {
+            item {
+                Text(
+                    vmState.errorMessage ?: "No makers loaded. Sync when maker discovery is enabled.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                )
+            }
+        } else {
+            items(makers) { maker ->
+                MakerRow(maker = maker, onClick = { selectedMaker = maker })
+            }
+        }
+
+        item { Spacer(Modifier.height(8.dp)) }
+        item {
+            Text("Tap any maker to see min/max swap, onion address and status.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary.copy(alpha = 0.6f))
+        }
     }
 }
 
+// ── Compact list row (MAKER + FEE) ───────────────────────────────────────────
+
 @Composable
-private fun MakerRow(maker: MakerInfo) {
+private fun MakerRow(maker: SwapMaker, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(Surface)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Maker ID with online dot
+        // Status dot + ID
         Row(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(7.dp)
+                    .size(8.dp)
                     .clip(CircleShape)
                     .background(if (maker.online) TorActive else TorInactive)
             )
-            Text(maker.shortId,
-                style = MaterialTheme.typography.labelSmall,
-                color = TextPrimary)
+            Text(
+                maker.id,
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        Text(maker.feeRate,   style = MaterialTheme.typography.labelSmall, color = TorActive,    modifier = Modifier.weight(1f))
-        Text(maker.minSwap,   style = MaterialTheme.typography.labelSmall, color = TextSecondary, modifier = Modifier.weight(1f))
-        Text(maker.maxSwap,   style = MaterialTheme.typography.labelSmall, color = TextSecondary, modifier = Modifier.weight(1f))
-        Text(maker.liquidity, style = MaterialTheme.typography.labelSmall, color = TextPrimary,   modifier = Modifier.weight(1f))
+
+        // Fee badge
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(TorActive.copy(alpha = 0.12f))
+                .border(1.dp, TorActive.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                "${maker.feeRatePct}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = TorActive
+            )
+        }
+    }
+}
+
+// ── Full detail bottom sheet ──────────────────────────────────────────────────
+
+@Composable
+private fun MakerDetailSheet(maker: SwapMaker, onDismiss: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .padding(top = 8.dp, bottom = 40.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
+    ) {
+        // Status header
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(if (maker.online) TorActive else TorInactive)
+            )
+            Text(
+                if (maker.online) "Online" else "Offline",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (maker.online) TorActive else TorInactive
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text("Maker Details",
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary)
+
+        Spacer(Modifier.height(16.dp))
+
+        // Detail rows
+        SheetDetailRow("Maker ID",       maker.id)
+        SheetDetailRow("Fee per hop",    "${maker.feeRatePct}%")
+        SheetDetailRow("Min swap",       "%,d sats".format(maker.minSats))
+        SheetDetailRow("Max swap",       "%,d sats".format(maker.maxSats))
+        SheetDetailRow("Onion address",  maker.onionAddress)
+
+        Spacer(Modifier.height(20.dp))
+
+        OutlinedButton(
+            onClick  = onDismiss,
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape    = RoundedCornerShape(10.dp),
+            border   = androidx.compose.foundation.BorderStroke(1.dp, Divider)
+        ) {
+            Text("Close", color = TextSecondary)
+        }
+    }
+}
+
+@Composable
+private fun SheetDetailRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = Divider, thickness = 0.5.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.weight(1f))
+            Text(value,
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1.8f).wrapContentWidth(Alignment.End))
+        }
     }
 }

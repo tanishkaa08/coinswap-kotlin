@@ -1,0 +1,9 @@
+# Intentionally minimal.
+#
+# `cargo ndk` injects the correct Android NDK linker/ar for each target ABI at
+# build time, so we do NOT hard-code linker paths here (doing so tends to break
+# across machines). This file exists mainly as a place to add per-target tweaks
+# later if you ever need them, e.g.:
+#
+# [target.aarch64-linux-android]
+# rustflags = ["-C", "link-arg=-Wl,--no-rosegment"]
