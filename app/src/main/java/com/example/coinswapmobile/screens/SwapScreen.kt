@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,6 +29,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.LabeledSwitch
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotInstallDialog
+import com.example.coinswapmobile.components.OrbotPromptBanner
 import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.coinswapTextFieldColors
@@ -82,7 +86,11 @@ fun SwapScreen(
     onSwapFailed: () -> Unit = {},
     swapViewModel: SwapViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val vmState by swapViewModel.uiState.collectAsState()
+    var showOrbotDialog by remember { mutableStateOf(false) }
+
+    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
     var amountSats       by remember { mutableStateOf("") }
     var makerCount       by remember { mutableIntStateOf(2) }
@@ -108,20 +116,10 @@ fun SwapScreen(
         utxos.addAll(vmState.utxos)
     }
 
-    // Observe swap completion / failure from ViewModel
-    LaunchedEffect(vmState.swapResult, vmState.swapError) {
-        when {
-            vmState.swapResult != null -> {
-                val ok = vmState.swapResult!!.status == com.example.coinswapmobile.screens.ReportStatus.COMPLETED
-                swapState = if (ok) SwapState.DONE else SwapState.IDLE
-                if (!ok) onSwapFailed()
-                swapViewModel.clearSwapResult()
-            }
-            vmState.swapError != null -> {
-                swapState = SwapState.IDLE
-                onSwapFailed()
-                swapViewModel.clearSwapResult()
-            }
+    LaunchedEffect(vmState.swapError) {
+        if (vmState.swapError != null) {
+            swapState = SwapState.IDLE
+            swapViewModel.clearSwapResult()
         }
     }
 
@@ -183,6 +181,37 @@ fun SwapScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary)
             }
+        }
+
+        vmState.swapError?.let { err ->
+            Text(
+                err,
+                style = MaterialTheme.typography.labelSmall,
+                color = TorInactive,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+
+        vmState.swapPhase?.let { phase ->
+            Text(
+                "Status: $phase",
+                style = MaterialTheme.typography.labelSmall,
+                color = TorActive,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+
+        if (!vmState.torReachable) {
+            OrbotPromptBanner(
+                onInstallClick = {
+                    if (OrbotHelper.isOrbotInstalled(context)) {
+                        OrbotHelper.openOrbotApp(context)
+                    } else {
+                        showOrbotDialog = true
+                    }
+                },
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
         }
 
         SectionCard {
@@ -287,7 +316,7 @@ fun SwapScreen(
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter number of makers (5–20):",
+                        Text("Enter number of makers (5-20):",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary)
                         OutlinedTextField(
@@ -502,15 +531,16 @@ fun SwapScreen(
             }
         }
 
-        val canSwap = amountSatsLong >= 100_000
+        val canSwap = vmState.capabilities?.coinswap == true
+            && amountSatsLong >= 100_000
             && eligibleMakers.size >= makerCount
             && selectedUtxoTotal >= amountSatsLong
 
         val validationMessage: String? = when {
             amountSatsLong <= 0 -> "Enter an amount to swap"
-            amountSatsLong < 100_000 -> "Amount too low — minimum is 100,000 sats"
+            amountSatsLong < 100_000 -> "Amount too low; minimum is 100,000 sats"
             eligibleMakers.size < makerCount ->
-                "Not enough eligible makers (${eligibleMakers.size}/${makerCount}) — relax fee filter"
+                "Not enough eligible makers (${eligibleMakers.size}/${makerCount}); relax fee filter"
             selectedUtxoTotal < amountSatsLong && amountSatsLong > 0 ->
                 "Selected UTXOs (${formatSats(selectedUtxoTotal)} sats) < swap amount"
             else -> null
@@ -536,6 +566,10 @@ fun SwapScreen(
 
         Button(
             onClick = {
+                if (!OrbotHelper.isOrbotInstalled(context)) {
+                    showOrbotDialog = true
+                    return@Button
+                }
                 if (canSwap) swapState = SwapState.CONFIRMING
             },
             modifier = Modifier

@@ -21,10 +21,24 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.QrCodeImage
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.WalletViewModel
+
+private fun networkHint(address: String?, rpcLabel: String): String {
+    val fromAddr = when {
+        address?.startsWith("tb1") == true -> "Testnet (tb1…)"
+        address?.startsWith("bc1") == true -> "Mainnet (bc1…)"
+        else -> null
+    }
+    if (fromAddr != null) return fromAddr
+    return when {
+        rpcLabel.contains("38332") || rpcLabel.contains("test", ignoreCase = true) ->
+            "Signet / test network; expect tb1… if applicable"
+        else -> "Address network must match your bitcoind chain"
+    }
+}
 
 @Composable
 fun ReceiveScreen(
@@ -42,7 +56,6 @@ fun ReceiveScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ── Header ────────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -52,12 +65,11 @@ fun ReceiveScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
             }
-            Text("Receive Bitcoin",
+            Text("Receive",
                 style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary)
         }
 
-        // ── Scrollable content ────────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -67,6 +79,12 @@ fun ReceiveScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Spacer(Modifier.height(4.dp))
+
+            Text(
+                networkHint(address, uiState.rpcLabel.ifBlank { uiState.backendLabel }),
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentAmber,
+                textAlign = TextAlign.Center)
 
             uiState.error?.let { message ->
                 Text("⚠  $message",
@@ -81,33 +99,29 @@ fun ReceiveScreen(
                 }
 
                 address == null -> {
-                    // No address yet — prompt the user to generate one from the wallet.
                     Spacer(Modifier.height(24.dp))
-                    Text("No receive address yet.",
+                    Text("Tap Generate to create a receive address via UniFFI Taker.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary,
                         textAlign = TextAlign.Center)
                 }
 
                 else -> {
-                    // QR placeholder
                     Box(
                         modifier = Modifier
                             .size(200.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Surface)
-                            .border(1.dp, Divider, RoundedCornerShape(16.dp)),
+                            .background(Color.White)
+                            .border(1.dp, Divider, RoundedCornerShape(16.dp))
+                            .padding(12.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("▦", fontSize = 72.sp, color = TextPrimary)
-                            Text("QR Code",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary)
-                        }
+                        QrCodeImage(
+                            data = address,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
 
-                    // Address box
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -140,7 +154,7 @@ fun ReceiveScreen(
                     }
 
                     Text(
-                        "Each address is single-use. Tap New Address for a fresh one.",
+                        "Fund this address from a testnet faucet, then tap Sync on Home.",
                         style     = MaterialTheme.typography.labelSmall,
                         color     = TextSecondary,
                         textAlign = TextAlign.Center,
@@ -152,7 +166,6 @@ fun ReceiveScreen(
             Spacer(Modifier.height(8.dp))
         }
 
-        // ── Fixed bottom actions ───────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -160,7 +173,6 @@ fun ReceiveScreen(
                 .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Generate / next address — both call the wallet for a fresh HD address.
             Button(
                 onClick  = {
                     copied = false

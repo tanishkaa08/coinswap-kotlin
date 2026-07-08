@@ -1,34 +1,84 @@
 package com.example.coinswapmobile.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.coinswapmobile.components.LabeledSwitch
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.SectionLabel
+import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.TakerAppConfig
+import com.example.coinswapmobile.data.TakerHolder
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
-import com.example.coinswapmobile.ui.theme.*
+import com.example.coinswapmobile.ui.theme.AccentAmber
+import com.example.coinswapmobile.ui.theme.Divider
+import com.example.coinswapmobile.ui.theme.Surface
+import com.example.coinswapmobile.ui.theme.TextPrimary
+import com.example.coinswapmobile.ui.theme.TextSecondary
+import com.example.coinswapmobile.ui.theme.TorActive
+import com.example.coinswapmobile.ui.theme.TorInactive
+import com.example.coinswapmobile.viewmodel.WalletViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
     onOpenRecovery: () -> Unit = {},
     onLogout: () -> Unit = {},
+    walletViewModel: WalletViewModel = viewModel(),
 ) {
     val context = LocalContext.current
     val session = remember { UserSession(context) }
+    val repo = remember { CoinswapRepository(context.filesDir.absolutePath) }
+    val caps = remember { repo.getCapabilities() }
+    val scope = rememberCoroutineScope()
+    val cfg = session.config
 
-    var decoyCount      by remember { mutableFloatStateOf(50f) }
-    var rotateServers   by remember { mutableStateOf(true) }
-    var broadcastRedund by remember { mutableFloatStateOf(3f) }
-    var torMode         by remember { mutableStateOf(true) }
+    var rpcHost by remember { mutableStateOf(cfg.rpcHost) }
+    var rpcPort by remember { mutableStateOf(cfg.rpcPort.toString()) }
+    var rpcUser by remember { mutableStateOf(cfg.rpcUsername) }
+    var rpcPass by remember { mutableStateOf(cfg.rpcPassword) }
+    var zmqHost by remember { mutableStateOf(cfg.zmqHost) }
+    var zmqPort by remember { mutableStateOf(cfg.zmqPort.toString()) }
+    var torControl by remember { mutableStateOf(cfg.torControlPort.toString()) }
+    var socksHost by remember { mutableStateOf(cfg.torSocksHost) }
+    var socksPort by remember { mutableStateOf(cfg.torSocksPort.toString()) }
+    var torAuth by remember { mutableStateOf(cfg.torAuthPassword) }
+    var walletName by remember { mutableStateOf(cfg.walletName) }
+    var walletPassword by remember { mutableStateOf(cfg.walletPassword) }
+    var torStatus by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var showResetConfirm by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -38,23 +88,115 @@ fun SettingsScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Settings",
-            style = MaterialTheme.typography.titleMedium,
-            color = TextPrimary)
+        Text("Settings", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
 
         SettingsCard {
-            SectionLabel("YOUR SESSION")
-            InfoRow("Backend", "Electrum")
-            InfoRow("Electrum server", session.electrumUrl)
+            SectionLabel("BITCOIN CORE RPC")
+            OutlinedTextField(rpcHost, { rpcHost = it }, label = { Text("RPC host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(rpcPort, { rpcPort = it.filter(Char::isDigit) }, label = { Text("RPC port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(rpcUser, { rpcUser = it }, label = { Text("RPC username") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(rpcPass, { rpcPass = it }, label = { Text("RPC password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(zmqHost, { zmqHost = it }, label = { Text("ZMQ host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(zmqPort, { zmqPort = it.filter(Char::isDigit) }, label = { Text("ZMQ port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(walletName, { walletName = it }, label = { Text("Wallet name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(walletPassword, { walletPassword = it }, label = { Text("Wallet password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            Button(
+                onClick = {
+                    val port = rpcPort.toIntOrNull() ?: return@Button
+                    val zPort = zmqPort.toIntOrNull() ?: return@Button
+                    val cPort = torControl.toIntOrNull() ?: TakerAppConfig.DEFAULT_TOR_CONTROL
+                    val sPort = socksPort.toIntOrNull() ?: TakerAppConfig.DEFAULT_SOCKS_PORT
+                    session.saveConfig(
+                        TakerAppConfig(
+                            rpcHost = rpcHost.trim(),
+                            rpcPort = port,
+                            rpcUsername = rpcUser,
+                            rpcPassword = rpcPass,
+                            zmqHost = zmqHost.trim(),
+                            zmqPort = zPort,
+                            torControlPort = cPort,
+                            torSocksHost = socksHost.trim(),
+                            torSocksPort = sPort,
+                            torAuthPassword = torAuth,
+                            walletName = walletName.trim(),
+                            walletPassword = walletPassword,
+                        )
+                    )
+                    walletViewModel.connectWallet()
+                    statusMessage = "Saved. Reconnecting taker…"
+                },
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = TorActive)
+            ) {
+                Text("Save & reconnect", color = androidx.compose.ui.graphics.Color.Black)
+            }
+        }
+
+        SettingsCard {
+            SectionLabel("TOR")
+            OutlinedTextField(socksHost, { socksHost = it }, label = { Text("SOCKS host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(socksPort, { socksPort = it.filter(Char::isDigit) }, label = { Text("SOCKS port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(torControl, { torControl = it.filter(Char::isDigit) }, label = { Text("Control port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(torAuth, { torAuth = it }, label = { Text("Tor auth password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            Button(
+                onClick = {
+                    scope.launch {
+                        val socks = TorManager.checkSocks(
+                            socksHost.trim().ifBlank { TakerAppConfig.DEFAULT_SOCKS_HOST },
+                            socksPort.toIntOrNull() ?: TakerAppConfig.DEFAULT_SOCKS_PORT,
+                        )
+                        val ctrl = TorManager.checkControl(
+                            socksHost.trim().ifBlank { TakerAppConfig.DEFAULT_SOCKS_HOST },
+                            torControl.toIntOrNull() ?: TakerAppConfig.DEFAULT_TOR_CONTROL,
+                        )
+                        torStatus = "${socks.message}\n${ctrl.message}"
+                        walletViewModel.refreshTorStatus()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Surface)
+            ) {
+                Text("Check Tor ports", color = TorActive)
+            }
+            torStatus?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            }
+        }
+
+        SettingsCard {
+            SectionLabel("DEBUG")
+            InfoRow("Taker initialized", TakerHolder.isInitialized.toString())
+            InfoRow("Native bindings", "org.coinswap UniFFI")
+            InfoRow("ABI", repo.deviceAbis)
+            InfoRow("RPC", session.config.rpcUrl)
+            InfoRow("ZMQ", session.config.zmqAddr)
             InfoRow("Wallet name", session.walletName)
-            InfoRow("Logged in", if (session.isLoggedIn) "Yes" else "No")
+            InfoRow("Data directory", context.filesDir.absolutePath)
+            InfoRow("Backend", caps.backend)
+            CapabilityRow("Wallet init", caps.walletInit)
+            CapabilityRow("Sync", caps.walletSync)
+            CapabilityRow("Receive", caps.receive)
+            CapabilityRow("List UTXOs", caps.listUtxos)
+            CapabilityRow("Send", caps.send)
+            CapabilityRow("History", caps.history)
+            CapabilityRow("Maker discovery", caps.makerDiscovery)
+            CapabilityRow("Coinswap", caps.coinswap)
+            CapabilityRow("Swap reports", caps.reports)
+            CapabilityRow("Recovery", caps.recovery)
+            if (caps.missingApis.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text("Not in UniFFI (UI stubs / desktop-only):", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                caps.missingApis.forEach { api ->
+                    Text("• $api", style = MaterialTheme.typography.labelSmall, color = AccentAmber)
+                }
+            }
         }
 
         SettingsCard {
             SectionLabel("SWAP RECOVERY")
-            Text("Resume or inspect an incomplete swap session.",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
+            Text("Call UniFFI recover_active_swap for incomplete sessions.", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
             Button(
                 onClick = onOpenRecovery,
                 modifier = Modifier.fillMaxWidth().height(44.dp),
@@ -66,49 +208,29 @@ fun SettingsScreen(
         }
 
         SettingsCard {
-            SectionLabel("TOR ROUTING")
-            LabeledSwitch(
-                label    = "Enable Tor",
-                subtitle = if (torMode) "All traffic routed through Tor" else "Clearnet (privacy reduced)",
-                checked  = torMode,
-                onChange = { torMode = it }
+            SectionLabel("WALLET DATA")
+            Text(
+                "Clearing local session does not delete Bitcoin Core wallet data. Re-init will reload/create via FFI.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
             )
-            LabeledSwitch(
-                label    = "Rotate server per query",
-                subtitle = "Each batch hits a different server",
-                checked  = rotateServers,
-                onChange = { rotateServers = it }
-            )
-        }
-
-        SettingsCard {
-            SectionLabel("ADDRESS PRIVACY")
-            LabeledSlider(
-                label    = "Decoy address count",
-                subtitle = "More decoys = stronger privacy",
-                value    = decoyCount,
-                range    = 20f..80f,
-                display  = "${decoyCount.toInt()} DECOYS/QUERY",
-                onChange = { decoyCount = it }
-            )
-        }
-
-        SettingsCard {
-            SectionLabel("BROADCAST")
-            LabeledSlider(
-                label    = "Broadcast redundancy",
-                subtitle = "Broadcast to multiple servers to prevent timing correlation",
-                value    = broadcastRedund,
-                range    = 1f..5f,
-                display  = "${broadcastRedund.toInt()}x",
-                onChange = { broadcastRedund = it }
-            )
+            OutlinedButton(
+                onClick = { showResetConfirm = true },
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                shape = RoundedCornerShape(8.dp),
+                border = BorderStroke(1.dp, TorInactive)
+            ) {
+                Text("Clear local taker + re-init", color = TorInactive)
+            }
         }
 
         SettingsCard {
             SectionLabel("SESSION")
             OutlinedButton(
-                onClick = onLogout,
+                onClick = {
+                    TakerHolder.clear()
+                    onLogout()
+                },
                 modifier = Modifier.fillMaxWidth().height(44.dp),
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, Divider)
@@ -120,10 +242,48 @@ fun SettingsScreen(
         SettingsCard {
             SectionLabel("ABOUT")
             InfoRow("Version", "0.1.0-alpha")
-            InfoRow("Network", "Mutinynet (testnet)")
+            InfoRow("Native bindings", "org.coinswap UniFFI")
             InfoRow("Protocol", "Maxwell-Belcher Coinswap")
         }
+
+        statusMessage?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = TorActive)
+        }
     }
+
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            containerColor = Surface,
+            title = { Text("Clear local taker?", color = TextPrimary) },
+            text = {
+                Text(
+                    "Drops the in-memory UniFFI Taker for \"$walletName\". Next reconnect calls Taker.init again.",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirm = false
+                        TakerHolder.clear()
+                        statusMessage = "Local Taker cleared. Tap Save & reconnect."
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = TorInactive)
+                ) { Text("Clear", color = androidx.compose.ui.graphics.Color.White) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirm = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun CapabilityRow(label: String, enabled: Boolean) {
+    InfoRow(label, if (enabled) "yes" else "no")
 }
 
 @Composable
@@ -148,28 +308,4 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         content = content
     )
-}
-
-@Composable
-private fun LabeledSlider(
-    label: String,
-    subtitle: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    display: String,
-    onChange: (Float) -> Unit
-) {
-    Column {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label,   style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-            Text(display, style = MaterialTheme.typography.labelSmall, color = TorActive)
-        }
-        Slider(
-            value         = value,
-            onValueChange = onChange,
-            valueRange    = range,
-            colors        = SliderDefaults.colors(thumbColor = TorActive, activeTrackColor = TorActive)
-        )
-        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-    }
 }

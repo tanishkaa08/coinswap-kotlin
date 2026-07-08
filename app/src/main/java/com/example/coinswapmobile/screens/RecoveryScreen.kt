@@ -20,16 +20,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.SwapRepository
-import com.example.coinswapmobile.data.TakerManager
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.ui.theme.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
-enum class RecoveryUiState { InProgress, Complete, Failed }
+enum class RecoveryUiState { InProgress, Complete, Failed, Idle }
 
 data class SwapRecoveryInfo(
     val failed: Boolean,
@@ -55,24 +54,6 @@ object SwapRecovery {
     }
 
     fun isFailedSwap(context: Context): Boolean = readSwapState(context)?.failed == true
-
-    suspend fun performRecovery(onLog: (String) -> Unit): Boolean =
-        withContext(Dispatchers.IO) {
-            if (!TakerManager.isInitialized) {
-                onLog("[recovery] Taker not initialized — cannot recover")
-                return@withContext false
-            }
-            onLog("[recovery] Reading swap state from taker daemon")
-            onLog("[recovery] Reconnecting to makers via Tor")
-            val result = SwapRepository().recoverActiveSwap()
-            if (result.isSuccess) {
-                onLog("[recovery] Recovery complete")
-                true
-            } else {
-                onLog("[recovery] Error: ${result.exceptionOrNull()?.message}")
-                false
-            }
-        }
 }
 
 private const val GITHUB_ISSUE_URL = "https://github.com/citadel-tech/coinswap/issues/new/choose"
@@ -84,30 +65,49 @@ fun RecoveryScreen(
     onAbandon: () -> Unit,
     onBack: (() -> Unit)? = null
 ) {
-    val context   = LocalContext.current
-    val swapInfo  = remember { SwapRecovery.readSwapState(context) }
-    var uiState   by remember { mutableStateOf(RecoveryUiState.InProgress) }
-    var logs      by remember { mutableStateOf(listOf<String>()) }
+    val context = LocalContext.current
+    val swapInfo = remember { SwapRecovery.readSwapState(context) }
+    var uiState by remember { mutableStateOf(RecoveryUiState.InProgress) }
+    var logs by remember { mutableStateOf(listOf<String>()) }
     var isRunning by remember { mutableStateOf(false) }
-    var succeeded by remember { mutableStateOf(false) }
-    val scope     = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     val logScroll = rememberScrollState()
+    val repo = remember { CoinswapRepository(context.filesDir.absolutePath) }
+    val swapRepo = remember { SwapRepository(repo) }
 
     fun appendLog(line: String) { logs = logs + line }
 
     suspend fun runRecovery() {
         if (isRunning) return
         isRunning = true
-        uiState   = RecoveryUiState.InProgress
-        logs      = emptyList()
-        val ok = SwapRecovery.performRecovery(::appendLog)
-        succeeded = ok
-        uiState   = if (ok) RecoveryUiState.Complete else RecoveryUiState.Failed
+        logs = emptyList()
+        uiState = RecoveryUiState.InProgress
+
+        appendLog("[recovery] Checking local swap state + calling UniFFI recoverActiveSwap…")
+        val detect = repo.detectRecoverableSwaps()
+        val swaps = detect.getOrDefault(emptyList())
+        swaps.forEach { s ->
+            appendLog("[recovery] Candidate ${s.swapId} phase=${s.phase}")
+        }
+        if (swaps.isEmpty()) {
+            appendLog("[recovery] No local failure markers; still attempting recoverActiveSwap()")
+        }
+
+        appendLog("[recovery] Running recoverActiveSwap…")
+        val swapId = swaps.firstOrNull { it.recoverable }?.swapId.orEmpty()
+        val result = swapRepo.recoverActiveSwap(swapId)
+        uiState = if (result.isSuccess) RecoveryUiState.Complete else RecoveryUiState.Failed
+        if (result.isSuccess) {
+            appendLog("[recovery] ${result.getOrNull()}")
+        } else {
+            appendLog("[recovery] Error: ${result.exceptionOrNull()?.message}")
+        }
         isRunning = false
     }
 
-    // Auto-start immediately
-    LaunchedEffect(Unit) { runRecovery() }
+    LaunchedEffect(Unit) {
+        if (autoStart) runRecovery()
+    }
 
     LaunchedEffect(logs.size) {
         if (logs.isNotEmpty()) logScroll.scrollTo(logScroll.maxValue)
@@ -118,7 +118,6 @@ fun RecoveryScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ── Header with back button ───────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -141,12 +140,11 @@ fun RecoveryScreen(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
-        // ── Status card ───────────────────────────────────────────────────────
         val borderColor = when (uiState) {
             RecoveryUiState.Complete -> TorActive
-            RecoveryUiState.Failed   -> TorInactive
-            else                     -> AccentAmber
+            RecoveryUiState.Failed -> TorInactive
+            RecoveryUiState.Idle -> TextSecondary
+            else -> AccentAmber
         }
         Column(
             modifier = Modifier
@@ -178,6 +176,11 @@ fun RecoveryScreen(
                         style = MaterialTheme.typography.titleMedium,
                         color = TorActive)
                 }
+                RecoveryUiState.Idle -> {
+                    Text("No recovery needed",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextSecondary)
+                }
                 RecoveryUiState.Failed -> {
                     Text("Recovery did not complete",
                         style = MaterialTheme.typography.titleMedium,
@@ -185,7 +188,6 @@ fun RecoveryScreen(
                 }
             }
 
-            // Swap status info
             if (swapInfo != null) {
                 HorizontalDivider(color = Divider, thickness = 0.5.dp)
                 Row(
@@ -209,12 +211,8 @@ fun RecoveryScreen(
                             color = TextPrimary)
                     }
                 }
-                Text("Source: swap.cwar  •  citadel-tech/coinswap",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
             }
 
-            // Actions
             when (uiState) {
                 RecoveryUiState.Complete -> {
                     Button(
@@ -228,15 +226,13 @@ fun RecoveryScreen(
                             style = MaterialTheme.typography.titleMedium)
                     }
                 }
-                RecoveryUiState.Failed -> {
-                    // Copy log button
+                RecoveryUiState.Idle, RecoveryUiState.Failed -> {
                     OutlinedButton(
                         onClick = {
-                            val logText = logs.joinToString("\n")
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
                             clipboard.setPrimaryClip(
-                                android.content.ClipData.newPlainText("Recovery Log", logText)
+                                android.content.ClipData.newPlainText("Recovery Log", logs.joinToString("\n"))
                             )
                         },
                         modifier = Modifier.fillMaxWidth().height(50.dp),
@@ -246,46 +242,33 @@ fun RecoveryScreen(
                         Icon(Icons.Default.ContentCopy, null,
                             tint = TextSecondary, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Copy Recovery Log", color = TextSecondary,
-                            style = MaterialTheme.typography.bodyMedium)
+                        Text("Copy Recovery Log", color = TextSecondary)
                     }
 
-                    // Open GitHub issue
                     Button(
                         onClick = {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_ISSUE_URL))
-                            )
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_ISSUE_URL)))
                         },
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = AccentPurple)
                     ) {
-                        Text("Open GitHub Issue",
-                            color = androidx.compose.ui.graphics.Color.White,
-                            style = MaterialTheme.typography.titleMedium)
+                        Text("Open GitHub Issue", color = androidx.compose.ui.graphics.Color.White)
                     }
 
-                    Text("Paste the recovery log in the issue so the team can help.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary)
-
-                    // Retry
                     OutlinedButton(
                         onClick = { scope.launch { runRecovery() } },
                         modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(12.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, AccentAmber)
                     ) {
-                        Text("Retry Recovery", color = AccentAmber,
-                            style = MaterialTheme.typography.bodyMedium)
+                        Text("Retry Recovery", color = AccentAmber)
                     }
                 }
-                RecoveryUiState.InProgress -> { /* running — no actions */ }
+                RecoveryUiState.InProgress -> { }
             }
         }
 
-        // ── Recovery log ─────────────────────────────────────────────────────
         if (logs.isNotEmpty() || uiState == RecoveryUiState.InProgress) {
             Column(
                 modifier = Modifier
@@ -295,31 +278,9 @@ fun RecoveryScreen(
                     .background(SurfaceAlt)
                     .padding(12.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("RECOVERY LOG",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary)
-                    if (logs.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                                    as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(
-                                    android.content.ClipData.newPlainText("Recovery Log",
-                                        logs.joinToString("\n"))
-                                )
-                            },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, "Copy log",
-                                tint = TextSecondary, modifier = Modifier.size(14.dp))
-                        }
-                    }
-                }
+                Text("RECOVERY LOG",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary)
                 Spacer(Modifier.height(6.dp))
                 Column(
                     modifier = Modifier
@@ -332,7 +293,8 @@ fun RecoveryScreen(
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
                             color = if (line.contains("error", ignoreCase = true) ||
-                                        line.contains("fail", ignoreCase = true))
+                                        line.contains("fail", ignoreCase = true) ||
+                                        line.contains("not implemented", ignoreCase = true))
                                         TorInactive else TextPrimary)
                     }
                 }
@@ -340,6 +302,6 @@ fun RecoveryScreen(
         }
 
             Spacer(Modifier.height(16.dp))
-        } // inner scroll Column
-    } // outer Column
+        }
+    }
 }

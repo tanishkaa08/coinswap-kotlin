@@ -4,9 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.SwapRepository
+import com.example.coinswapmobile.data.TakerHolder
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
+import com.example.coinswapmobile.model.NativeCapabilities
+import com.example.coinswapmobile.model.PreparedSwap
 import com.example.coinswapmobile.screens.SwapMaker
-import com.example.coinswapmobile.screens.SwapReport
 import com.example.coinswapmobile.screens.SwapUtxo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,31 +22,56 @@ data class SwapUiState(
     val walletSats: Long = 0L,
     val utxos: List<SwapUtxo> = emptyList(),
     val makers: List<SwapMaker> = emptyList(),
+    val capabilities: NativeCapabilities? = null,
+    val torReachable: Boolean = false,
+    val torStatusMessage: String = "",
     val errorMessage: String? = null,
-    val swapResult: SwapReport? = null,
     val swapError: String? = null,
     val isSwapping: Boolean = false,
-    val currentSwapId: String? = null,
+    val swapPhase: String? = null,
+    val preparedSwap: PreparedSwap? = null,
+    val lastSwapId: String? = null,
 )
 
 class SwapViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val walletRepo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val coinswapRepo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val swapRepo = SwapRepository(coinswapRepo)
 
-    private val _state = MutableStateFlow(SwapUiState())
+    private val _state = MutableStateFlow(
+        SwapUiState(capabilities = coinswapRepo.getCapabilities())
+    )
     val uiState = _state.asStateFlow()
 
     init { loadWalletData() }
 
     fun loadWalletData() {
         if (!session.isLoggedIn) {
-            _state.update { it.copy(isLoading = false, walletSats = 0, utxos = emptyList(), makers = emptyList()) }
+            _state.update { it.copy(isLoading = false, walletSats = 0, utxos = emptyList()) }
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, errorMessage = null) }
-            walletRepo.getBalance()
+            val tor = TorManager.checkSocks(session.socksHost, session.socksPort)
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    capabilities = coinswapRepo.getCapabilities(),
+                    torReachable = tor.reachable,
+                    torStatusMessage = tor.message,
+                )
+            }
+            if (!TakerHolder.isInitialized) {
+                coinswapRepo.initTaker(session)
+                    .onFailure { e ->
+                        _state.update {
+                            it.copy(isLoading = false, errorMessage = e.message)
+                        }
+                        return@launch
+                    }
+            }
+            coinswapRepo.getBalance()
                 .onSuccess { state ->
                     val utxos = state.utxos.map { u ->
                         SwapUtxo(
@@ -52,12 +81,24 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                             selected = true,
                         )
                     }
+                    val makers = coinswapRepo.listMakers().getOrNull().orEmpty().map { m ->
+                        SwapMaker(
+                            id = m.id,
+                            feeRatePct = m.feeRatePct,
+                            minSats = m.minSats,
+                            maxSats = m.maxSats,
+                            liquiditySats = m.liquiditySats,
+                            fidelityBondBtc = m.fidelityBondBtc,
+                            onionAddress = m.onionAddress,
+                            online = m.online,
+                        )
+                    }
                     _state.update {
                         it.copy(
                             isLoading = false,
                             walletSats = state.balanceSats,
                             utxos = utxos,
-                            makers = emptyList(),
+                            makers = makers,
                         )
                     }
                 }
@@ -74,12 +115,71 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         makerCount: Int,
         feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
+        makerIds: List<String> = emptyList(),
+        protocol: String = session.config.protocol,
     ) {
-        // TODO: startSwap() — full coinswap flow not wired in this build.
-        _state.update { it.copy(swapError = "Swap execution is not available in this build yet.") }
+        viewModelScope.launch {
+            val tor = TorManager.checkSocks(session.socksHost, session.socksPort)
+            if (!tor.reachable) {
+                _state.update {
+                    it.copy(swapError = "Tor SOCKS required for swaps: ${tor.message}")
+                }
+                return@launch
+            }
+            if (!TakerHolder.isInitialized) {
+                coinswapRepo.initTaker(session).onFailure { e ->
+                    _state.update { it.copy(swapError = e.message) }
+                    return@launch
+                }
+            }
+            if (selectedUtxos.isEmpty()) {
+                _state.update { it.copy(swapError = "Select at least one UTXO") }
+                return@launch
+            }
+            _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing offerbook…") }
+            coinswapRepo.syncOfferbook()
+            _state.update { it.copy(swapPhase = "Preparing…") }
+            swapRepo.prepareCoinswap(
+                amountSats = amountSats,
+                makerCount = makerCount,
+                feeRateSatPerVb = feeRateSatPerVb,
+                selectedUtxos = selectedUtxos,
+                makerIds = makerIds,
+                protocol = protocol,
+            )
+                .onSuccess { prepared ->
+                    _state.update {
+                        it.copy(preparedSwap = prepared, swapPhase = "Executing coinswap…")
+                    }
+                    swapRepo.startCoinswap(prepared)
+                        .onSuccess { report ->
+                            _state.update {
+                                it.copy(
+                                    isSwapping = false,
+                                    lastSwapId = report.id,
+                                    swapPhase = "Completed: ${report.status}",
+                                    preparedSwap = null,
+                                )
+                            }
+                            loadWalletData()
+                        }
+                        .onFailure { e ->
+                            _state.update {
+                                it.copy(
+                                    isSwapping = false,
+                                    swapError = e.message,
+                                    swapPhase = "Failed during execution",
+                                )
+                            }
+                        }
+                }
+                .onFailure { e ->
+                    _state.update { it.copy(isSwapping = false, swapError = e.message, swapPhase = null) }
+                }
+        }
     }
 
     fun clearSwapResult() {
-        _state.update { it.copy(swapResult = null, swapError = null) }
+        _state.update { it.copy(swapError = null, swapPhase = null) }
     }
 }

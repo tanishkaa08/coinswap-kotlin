@@ -8,6 +8,8 @@ android {
     namespace = "com.example.coinswapmobile"
     compileSdk = 35
 
+    val demoRegtestHost = (project.findProperty("demoRegtestHost") as String?)?.trim().orEmpty()
+
     defaultConfig {
         applicationId = "com.example.coinswapmobile"
         minSdk = 26
@@ -17,21 +19,39 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // arm64-v8a = most physical phones; armeabi-v7a = older ARM devices.
-        // x86_64 emulator is not supported until libcoinswap_mobile.so is built for it.
+        // Optional: gradlew assembleDebug -PdemoRegtestHost=203.0.113.10
+        buildConfigField("String", "DEMO_REGTEST_HOST", "\"$demoRegtestHost\"")
+
+        // Official ARM64 UniFFI .so from coinswap-ffi
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
     packaging {
         jniLibs {
+            // Unpack .so so JNA can find libcoinswap_ffi.so
             useLegacyPackaging = true
         }
     }
 
-    // Rust .so files built by `cargo ndk -o app/src/main/jniLibs ...` live here.
-    sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
+    // Generated UniFFI Kotlin + native libs from coinswap-ffi (do not edit those files).
+    // Path is relative to this module (:app), so ../ goes to D:/dev then into coinswap-ffi.
+    val ffiLibRoot = rootProject.file("../coinswap-ffi/coinswap-kotlin/lib")
+    require(ffiLibRoot.resolve("src/main/kotlin/org/coinswap/coinswap.kt").isFile) {
+        "Missing generated UniFFI sources at ${ffiLibRoot.absolutePath}. " +
+            "Expected sibling checkout at D:/dev/coinswap-ffi with coinswap.kt generated."
+    }
+    sourceSets {
+        getByName("main") {
+            kotlin.srcDir(ffiLibRoot.resolve("src/main/kotlin"))
+            jniLibs.srcDirs(
+                ffiLibRoot.resolve("src/main/jniLibs"),
+                "src/main/jniLibs",
+            )
+        }
+    }
+
     androidResources {
         noCompress += listOf("so")
     }
@@ -46,36 +66,37 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
-    dependencies {
-        implementation("androidx.core:core-ktx:1.15.0")
-        implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-        implementation("androidx.activity:activity-compose:1.10.1")
-        implementation("androidx.navigation:navigation-compose:2.8.5")
-        implementation("androidx.compose.material:material-icons-extended:1.6.7")
-        implementation("androidx.compose.animation:animation:1.6.7")
-        implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-        implementation("androidx.compose.ui:ui")
-        implementation("androidx.compose.ui:ui-graphics")
-        implementation("androidx.compose.ui:ui-tooling-preview")
-        implementation("androidx.compose.material3:material3")
-        implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.compose.material:material-icons-extended:1.6.7")
+    implementation("androidx.compose.animation:animation:1.6.7")
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.google.zxing:core:3.5.3")
 
-        // Native coinswap taker library — build from coinswap-ffi/coinswap-kotlin, then restore
-        // this line and run:  ./gradlew :lib:publishToMavenLocal -PlocalBuild=true
-        // implementation("org.coinswap:coinswap-kotlin:1.0.0")
+    // Required by generated UniFFI Kotlin (loads libcoinswap_ffi via JNA)
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
 
-        androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
-        debugImplementation("androidx.compose.ui:ui-tooling")
-    }
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    debugImplementation("androidx.compose.ui:ui-tooling")
+}

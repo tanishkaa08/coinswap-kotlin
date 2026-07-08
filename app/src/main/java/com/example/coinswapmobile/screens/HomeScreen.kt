@@ -19,8 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotInstallDialog
+import com.example.coinswapmobile.components.OrbotPromptBanner
 import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.ui.components.PrivacyLevel
 import com.example.coinswapmobile.ui.components.TorStatusBadge
@@ -31,12 +35,16 @@ import com.example.coinswapmobile.viewmodel.WalletViewModel
 
 @Composable
 fun HomeScreen(
-    onSendClick:    () -> Unit,
+    onSendClick: () -> Unit,
     onReceiveClick: () -> Unit,
     walletViewModel: WalletViewModel = viewModel(),
 ) {
     val uiState by walletViewModel.uiState.collectAsState()
     var balanceVisible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var showOrbotDialog by remember { mutableStateOf(false) }
+
+    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
     LazyColumn(
         modifier = Modifier
@@ -45,7 +53,6 @@ fun HomeScreen(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top bar
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -55,21 +62,22 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = TorActive)
                 Spacer(Modifier.weight(1f))
-                TorStatusBadge(isActive = uiState.isInitialized && uiState.error == null)
+                TorStatusBadge(isActive = uiState.torReachable && uiState.isInitialized)
             }
         }
 
         item {
-            Text(uiState.backendLabel,
+            Text(
+                if (uiState.backendLabel.isNotBlank()) uiState.backendLabel
+                else "Bitcoin Core RPC • not connected",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
         }
 
-        if (uiState.nativeStatus.isNotBlank() &&
-            (!uiState.isInitialized || uiState.error != null)
-        ) {
+        if (!uiState.isInitialized && uiState.libraryLoadStatus.isNotBlank()) {
             item {
-                Text(uiState.nativeStatus,
+                Text(
+                    uiState.libraryLoadStatus,
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary)
             }
@@ -83,7 +91,20 @@ fun HomeScreen(
             }
         }
 
-        // Balance card
+        if (uiState.isInitialized && !uiState.torReachable) {
+            item {
+                OrbotPromptBanner(
+                    onInstallClick = {
+                        if (OrbotHelper.isOrbotInstalled(context)) {
+                            OrbotHelper.openOrbotApp(context)
+                        } else {
+                            showOrbotDialog = true
+                        }
+                    },
+                )
+            }
+        }
+
         item {
             Column(
                 modifier = Modifier
@@ -103,7 +124,7 @@ fun HomeScreen(
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "balance"
                 ) { visible ->
-                    if (uiState.isLoading && uiState.balanceSats == 0L) {
+                    if (uiState.isLoading && !uiState.isInitialized) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             color = TorActive,
@@ -134,24 +155,22 @@ fun HomeScreen(
             }
         }
 
-        // Send / Receive
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                ActionButton("SEND",    Icons.AutoMirrored.Filled.CallMade,     Modifier.weight(1f), onSendClick)
+                ActionButton("SEND", Icons.AutoMirrored.Filled.CallMade, Modifier.weight(1f), onSendClick)
                 ActionButton("RECEIVE", Icons.AutoMirrored.Filled.CallReceived, Modifier.weight(1f), onReceiveClick)
             }
         }
 
-        // UTXOs header
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("UTXOs",
+                Text("UTXOs (${uiState.utxos.size})",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary)
                 Spacer(Modifier.weight(1f))
@@ -164,30 +183,16 @@ fun HomeScreen(
 
         if (uiState.utxos.isEmpty() && !uiState.isLoading) {
             item {
-                Text("No UTXOs yet, fund your receive address to see coins here.",
+                Text("No UTXOs yet. Fund a receive address and tap Sync.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary)
             }
         } else {
             items(uiState.utxos) { utxo -> UtxoCard(utxo.toUtxoItem()) }
         }
-
-        // Recent transactions — Electrum history is not exposed yet (see PR #874 notes)
-        item { Spacer(Modifier.height(4.dp)) }
-        item {
-            Text("RECENT TRANSACTIONS",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-        }
-        item {
-            Text("Transaction history is not available on the Electrum backend yet.",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-        }
     }
 }
 
-/** Maps a wallet UTXO to the existing UtxoCard model, deriving a privacy level from confirmations. */
 private fun UtxoUiModel.toUtxoItem(): UtxoItem {
     val privacy = when {
         (confirmations ?: 0) == 0 -> PrivacyLevel.LOW
@@ -204,10 +209,10 @@ private fun UtxoUiModel.toUtxoItem(): UtxoItem {
 
 @Composable
 private fun ActionButton(
-    label:    String,
-    icon:     ImageVector,
+    label: String,
+    icon: ImageVector,
     modifier: Modifier = Modifier,
-    onClick:  () -> Unit
+    onClick: () -> Unit
 ) {
     Button(
         onClick  = onClick,

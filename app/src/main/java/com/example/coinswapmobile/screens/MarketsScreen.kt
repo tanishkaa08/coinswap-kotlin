@@ -13,20 +13,35 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotInstallDialog
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.MarketsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
+    val context = LocalContext.current
     val vmState      by marketsViewModel.uiState.collectAsState()
     val makers       = vmState.makers
     val isSyncing    = vmState.isSyncing
     var selectedMaker by remember { mutableStateOf<SwapMaker?>(null) }
+    var showOrbotDialog by remember { mutableStateOf(false) }
     val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
+
+    fun syncWithOrbotCheck() {
+        if (!OrbotHelper.isOrbotInstalled(context)) {
+            showOrbotDialog = true
+            return
+        }
+        marketsViewModel.syncMarketplace()
+    }
 
     if (selectedMaker != null) {
         ModalBottomSheet(
@@ -66,7 +81,7 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         // ── Sync button ─────────────────────────────────────────────────────
         item {
             Button(
-                onClick = { marketsViewModel.syncMarketplace() },
+                onClick = { syncWithOrbotCheck() },
                 enabled  = !isSyncing,
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape    = RoundedCornerShape(12.dp),
@@ -110,10 +125,13 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         // ── Maker rows ──────────────────────────────────────────────────────
         if (makers.isEmpty()) {
             item {
+                val message = vmState.errorMessage
+                    ?: if (!vmState.torReachable) vmState.torStatusMessage else null
+                    ?: "No makers loaded. Sync the marketplace."
                 Text(
-                    vmState.errorMessage ?: "No makers loaded. Sync when maker discovery is enabled.",
+                    message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
+                    color = if (vmState.errorMessage != null) AccentAmber else TextSecondary,
                 )
             }
         } else {

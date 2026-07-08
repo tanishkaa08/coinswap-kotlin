@@ -22,8 +22,10 @@ import com.example.coinswapmobile.screens.SettingsScreen
 import com.example.coinswapmobile.screens.SwapRecovery
 import com.example.coinswapmobile.screens.SwapScreen
 import com.example.coinswapmobile.screens.SwapReportsScreen
+import com.example.coinswapmobile.screens.WalletHistoryScreen
 import com.example.coinswapmobile.screens.SendScreen
 import com.example.coinswapmobile.screens.ReceiveScreen
+import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.Background
 import com.example.coinswapmobile.ui.theme.Surface
@@ -68,6 +70,7 @@ fun CoinSwapNavGraph() {
     }
 
     fun logout() {
+        TakerHolder.clear()
         UserSession.clearSession(context)
         navController.navigate(Screen.Login.route) {
             popUpTo(0) { inclusive = true }
@@ -139,7 +142,7 @@ fun CoinSwapNavGraph() {
                 )
             }
             composable(Screen.History.route) {
-                SwapReportsScreen(onBack = { navController.popBackStack() })
+                WalletHistoryScreen()
             }
             composable("swap_reports") {
                 SwapReportsScreen(onBack = { navController.popBackStack() })

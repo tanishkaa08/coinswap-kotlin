@@ -121,8 +121,9 @@ fun SwapReportsScreen(
         ) {
             if (reports.isEmpty()) {
                 item {
+                    val msg = vmState.errorMessage ?: "No swap history yet."
                     Text(
-                        "No swap history yet.",
+                        msg,
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                         modifier = Modifier.padding(vertical = 8.dp),

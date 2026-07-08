@@ -1,189 +1,126 @@
 package com.example.coinswapmobile.data
 
-import android.util.Log
+import com.example.coinswapmobile.model.MakerUiModel
+import com.example.coinswapmobile.model.PreparedSwap
+import com.example.coinswapmobile.model.SwapReportUiModel
+import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.screens.ReportStatus
+import com.example.coinswapmobile.screens.SwapMaker
 import com.example.coinswapmobile.screens.SwapReport
 import com.example.coinswapmobile.screens.SwapUtxo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.UUID
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  STUB MODE — all FFI calls are no-ops until coinswap-kotlin is built.
-//  See TakerManager.kt for how to enable the real implementation.
-// ─────────────────────────────────────────────────────────────────────────────
+class MarketRepository(
+    private val coinswap: CoinswapRepository,
+) {
+    suspend fun syncOfferbookAndWait(): Result<Unit> = coinswap.syncOfferbook()
 
-private data class PendingSwap(
-    val amountSats: Long,
-    val makerCount: Int,
-    val feeRateSatPerVb: Int,
-    val utxos: List<SwapUtxo>,
-)
+    suspend fun fetchOffers(): Result<List<SwapMaker>> =
+        coinswap.listMakers().map { makers -> makers.map { it.toSwapMaker() } }
 
-class SwapRepository {
+    private fun MakerUiModel.toSwapMaker() = SwapMaker(
+        id = id,
+        feeRatePct = feeRatePct,
+        minSats = minSats,
+        maxSats = maxSats,
+        liquiditySats = liquiditySats,
+        fidelityBondBtc = fidelityBondBtc,
+        onionAddress = onionAddress,
+        online = online,
+    )
+}
 
-    private companion object {
-        const val TAG = "SwapRepository"
-    }
-
-    private val pendingSwaps = mutableMapOf<String, PendingSwap>()
-
-    suspend fun listSpendableUtxos(): Result<List<SwapUtxo>> = withContext(Dispatchers.IO) {
-        val taker = TakerManager.rawTaker()
-        if (taker == null) return@withContext Result.success(emptyList())
-        try {
-            @Suppress("UNCHECKED_CAST")
-            val raw = taker.javaClass.getMethod("listSpendableUtxos").invoke(taker) as? List<*>
-                ?: return@withContext Result.success(emptyList())
-
-            val items = raw.mapNotNull { u ->
-                if (u == null) return@mapNotNull null
-                val cls     = u.javaClass
-                val txidObj = cls.getMethod("getTxid").invoke(u)
-                val txid    = txidObj?.javaClass?.getMethod("toString")?.invoke(txidObj)?.toString()
-                    ?: return@mapNotNull null
-                val value   = (cls.getMethod("getValue").invoke(u) as? Number)?.toLong() ?: 0L
-                val confs   = (cls.getMethod("getConfirmations").invoke(u) as? Number)?.toInt() ?: 0
-                SwapUtxo(txid = txid, amountSats = value, confirmed = confs > 0, selected = true)
+class SwapRepository(
+    private val coinswap: CoinswapRepository,
+) {
+    suspend fun listSpendableUtxos(): Result<List<SwapUtxo>> =
+        coinswap.getBalance().map { state ->
+            state.utxos.map { u ->
+                SwapUtxo(
+                    txid = u.txid,
+                    amountSats = u.amountSats,
+                    confirmed = (u.confirmations ?: 0) > 0,
+                    selected = true,
+                )
             }
-            Result.success(items)
-        } catch (e: Throwable) {
-            Log.e(TAG, "listSpendableUtxos failed", e)
-            Result.failure(e)
         }
-    }
 
-    /**
-     * Validates parameters and reserves a local swap ID.
-     * The actual FFI call happens in [startCoinswap].
-     */
     suspend fun prepareCoinswap(
         amountSats: Long,
         makerCount: Int,
         feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        if (!TakerManager.isInitialized) {
-            return@withContext Result.failure(
-                Exception("Not connected — build coinswap-kotlin and provide a Bitcoin Core node first")
+        makerIds: List<String> = emptyList(),
+        protocol: String = "Legacy",
+    ): Result<PreparedSwap> = withContext(Dispatchers.IO) {
+        if (amountSats <= 0) {
+            return@withContext Result.failure(IllegalArgumentException("Amount must be positive"))
+        }
+        if (selectedUtxos.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Select at least one UTXO"))
+        }
+        val walletUtxos = coinswap.getBalance().getOrNull()?.utxos.orEmpty()
+        val enriched = selectedUtxos.map { u ->
+            val match = walletUtxos.find { it.txid == u.txid }
+            UtxoUiModel(
+                txid = u.txid,
+                vout = match?.vout ?: 0,
+                amountSats = u.amountSats,
+                confirmations = match?.confirmations,
+                spendable = u.confirmed,
             )
         }
-        if (amountSats <= 0) return@withContext Result.failure(Exception("Amount must be positive"))
-        if (selectedUtxos.isEmpty()) return@withContext Result.failure(Exception("Select at least one UTXO"))
-
-        val swapId = UUID.randomUUID().toString().replace("-", "").take(10)
-        pendingSwaps[swapId] = PendingSwap(amountSats, makerCount, feeRateSatPerVb, selectedUtxos)
-        Result.success(swapId)
+        coinswap.prepareCoinswap(
+            amountSats = amountSats,
+            makerCount = makerCount,
+            feeRateSatPerVb = feeRateSatPerVb.toLong(),
+            selectedUtxos = enriched,
+            makerIds = makerIds,
+            protocol = protocol,
+        )
     }
 
-    /**
-     * Executes the swap prepared by [prepareCoinswap].
-     * Blocking: may run for minutes — call from a coroutine on IO dispatcher.
-     */
-    suspend fun startCoinswap(swapId: String): Result<SwapReport> = withContext(Dispatchers.IO) {
-        val pending = pendingSwaps.remove(swapId)
-            ?: return@withContext Result.failure(Exception("Unknown swap ID: $swapId"))
+    suspend fun startCoinswap(prepared: PreparedSwap): Result<SwapReportUiModel> =
+        coinswap.startCoinswap(prepared)
 
-        val taker = TakerManager.rawTaker()
-            ?: return@withContext Result.failure(Exception("Taker not initialized"))
+    suspend fun recoverActiveSwap(swapId: String = ""): Result<String> =
+        coinswap.recoverActiveSwap(swapId)
 
-        val startMs = System.currentTimeMillis()
-        try {
-            val outPointClass   = Class.forName("org.coinswap.OutPoint")
-            val txidClass       = Class.forName("org.coinswap.Txid")
-            val swapParamsClass = Class.forName("org.coinswap.SwapParams")
+    suspend fun getSwapReports(): Result<List<SwapReport>> =
+        coinswap.listSwapReports().map { list -> list.map { it.toScreenReport() } }
 
-            val outPoints = pending.utxos.map { u ->
-                val txidObj = txidClass.getDeclaredConstructor(String::class.java).newInstance(u.txid)
-                outPointClass.getDeclaredConstructor(txidClass, Int::class.javaPrimitiveType!!)
-                    .newInstance(txidObj, 0)
-            }
-
-            val params = swapParamsClass
-                .getDeclaredConstructor(List::class.java, Long::class.javaPrimitiveType!!,
-                    Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
-                .newInstance(outPoints, pending.amountSats, pending.makerCount, 3)
-
-            val reportObj = taker.javaClass.getMethod("doCoinswap", swapParamsClass)
-                .invoke(taker, params)
-                ?: return@withContext Result.failure(Exception("Swap returned no report"))
-
-            val elapsedMs   = System.currentTimeMillis() - startMs
-            val elapsedMins = elapsedMs / 60_000
-            val durationStr = "${elapsedMins / 60}h ${elapsedMins % 60}m"
-
-            val cls       = reportObj.javaClass
-            val fee       = runCatching { (cls.getMethod("getFeePaid").invoke(reportObj) as? Number)?.toLong() ?: 0L }.getOrDefault(0L)
-            val statusStr = runCatching { cls.getMethod("getStatus").invoke(reportObj)?.toString() ?: "completed" }.getOrDefault("completed")
-            val status    = if (statusStr.contains("fail", ignoreCase = true)) ReportStatus.FAILED else ReportStatus.COMPLETED
-
-            Result.success(
-                SwapReport(
-                    id           = swapId,
-                    timeAgo      = "just now",
-                    duration     = durationStr,
-                    status       = status,
-                    hops         = pending.makerCount * 2,
-                    protocol     = "TAPROOT",
-                    amountSats   = pending.amountSats,
-                    makerCount   = pending.makerCount,
-                    totalFeeSats = fee,
-                    outputSats   = pending.amountSats,
-                )
-            )
-        } catch (e: Throwable) {
-            Log.e(TAG, "startCoinswap failed", e)
-            Result.failure(e)
+    private fun SwapReportUiModel.toScreenReport(): SwapReport {
+        val mappedStatus = when (status) {
+            SwapReportUiModel.Status.FAILED,
+            SwapReportUiModel.Status.RECOVERED -> ReportStatus.FAILED
+            else -> ReportStatus.COMPLETED
         }
-    }
-
-    suspend fun recoverActiveSwap(): Result<String> = withContext(Dispatchers.IO) {
-        val taker = TakerManager.rawTaker()
-            ?: return@withContext Result.failure(Exception("Not connected"))
-        try {
-            val result = taker.javaClass.getMethod("recoverActiveSwap").invoke(taker)?.toString() ?: "recovered"
-            Result.success(result)
-        } catch (e: Throwable) {
-            Log.e(TAG, "recoverActiveSwap failed", e)
-            Result.failure(e)
+        val timeAgo = startTimestamp?.let {
+            SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(it * 1000))
+        } ?: "-"
+        val durationLabel = if (durationSeconds > 0) {
+            val mins = TimeUnit.SECONDS.toMinutes(durationSeconds.toLong())
+            "${mins}m"
+        } else {
+            "-"
         }
-    }
-
-    suspend fun getSwapReports(): Result<List<SwapReport>> = withContext(Dispatchers.IO) {
-        val taker = TakerManager.rawTaker()
-        if (taker == null) return@withContext Result.success(emptyList())
-        try {
-            @Suppress("UNCHECKED_CAST")
-            val raw = taker.javaClass.getMethod("listSwapReports").invoke(taker) as? List<*>
-                ?: return@withContext Result.success(emptyList())
-
-            val reports = raw.mapNotNull { r ->
-                if (r == null) return@mapNotNull null
-                val cls       = r.javaClass
-                val id        = runCatching { cls.getMethod("getSwapId").invoke(r)?.toString() ?: "" }.getOrDefault("")
-                val amount    = runCatching { (cls.getMethod("getAmount").invoke(r) as? Number)?.toLong() ?: 0L }.getOrDefault(0L)
-                val fee       = runCatching { (cls.getMethod("getFeePaid").invoke(r) as? Number)?.toLong() ?: 0L }.getOrDefault(0L)
-                val statusStr = runCatching { cls.getMethod("getStatus").invoke(r)?.toString() ?: "" }.getOrDefault("")
-                val status    = if (statusStr.contains("fail", ignoreCase = true)) ReportStatus.FAILED else ReportStatus.COMPLETED
-                @Suppress("UNCHECKED_CAST")
-                val makerCount = runCatching { (cls.getMethod("getMakerAddresses").invoke(r) as? List<*>)?.size ?: 1 }.getOrDefault(1)
-                SwapReport(
-                    id           = id,
-                    timeAgo      = "unknown",
-                    duration     = "unknown",
-                    status       = status,
-                    hops         = makerCount * 2,
-                    protocol     = "TAPROOT",
-                    amountSats   = amount,
-                    makerCount   = makerCount,
-                    totalFeeSats = fee,
-                    outputSats   = amount,
-                )
-            }
-            Result.success(reports)
-        } catch (e: Throwable) {
-            Log.e(TAG, "getSwapReports failed", e)
-            Result.failure(e)
-        }
+        return SwapReport(
+            id = id,
+            timeAgo = timeAgo,
+            duration = durationLabel,
+            status = mappedStatus,
+            hops = hops,
+            protocol = protocol,
+            amountSats = amountSats,
+            makerCount = makerCount,
+            totalFeeSats = totalFeeSats,
+            outputSats = outputSats,
+            errorMessage = errorMessage,
+        )
     }
 }
