@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.SwapRepository
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
@@ -36,7 +37,7 @@ data class SwapUiState(
 class SwapViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val coinswapRepo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val coinswapRepo = CoinswapRepository(appDataDir = FfiEnv.takerDataDir(app))
     private val swapRepo = SwapRepository(coinswapRepo)
 
     private val _state = MutableStateFlow(
@@ -73,14 +74,22 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             }
             coinswapRepo.getBalance()
                 .onSuccess { state ->
-                    val utxos = state.utxos.map { u ->
-                        SwapUtxo(
-                            txid = u.txid,
-                            amountSats = u.amountSats,
-                            confirmed = (u.confirmations ?: 0) > 0,
-                            selected = true,
-                        )
-                    }
+                    val utxos = state.utxos
+                        .filter { u ->
+                            u.spendable &&
+                                (u.spendType == "SeedCoin" || u.spendType == "IncomingSwapCoin" || u.spendType == "SweptCoin")
+                        }
+                        .map { u ->
+                            SwapUtxo(
+                                txid = u.txid,
+                                vout = u.vout,
+                                amountSats = u.amountSats,
+                                confirmed = (u.confirmations ?: 0) > 0,
+                                spendable = u.spendable,
+                                spendType = u.spendType,
+                                selected = true,
+                            )
+                        }
                     val makers = coinswapRepo.listMakers().getOrNull().orEmpty().map { m ->
                         SwapMaker(
                             id = m.id,
@@ -136,7 +145,27 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(swapError = "Select at least one UTXO") }
                 return@launch
             }
-            _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing offerbook…") }
+            _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing wallet…") }
+            coinswapRepo.syncWallet()
+                .onFailure { e ->
+                    _state.update { it.copy(isSwapping = false, swapError = e.message) }
+                    return@launch
+                }
+            val freshUtxos = coinswapRepo.getBalance().getOrNull()?.utxos.orEmpty()
+            val invalid = selectedUtxos.filter { sel ->
+                freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
+            }
+            if (invalid.isNotEmpty()) {
+                _state.update {
+                    it.copy(
+                        isSwapping = false,
+                        swapError = "Selected coins are locked or tied to a previous swap. " +
+                            "Check Reports → Recovery, sync wallet, then pick different UTXOs.",
+                    )
+                }
+                return@launch
+            }
+            _state.update { it.copy(swapPhase = "Syncing offerbook…") }
             coinswapRepo.syncOfferbook()
             _state.update { it.copy(swapPhase = "Preparing…") }
             swapRepo.prepareCoinswap(
@@ -180,6 +209,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearSwapResult() {
-        _state.update { it.copy(swapError = null, swapPhase = null) }
+        _state.update { it.copy(swapError = null, swapPhase = null, lastSwapId = null) }
     }
 }

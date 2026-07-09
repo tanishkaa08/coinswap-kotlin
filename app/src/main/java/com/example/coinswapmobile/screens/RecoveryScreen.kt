@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.SwapRepository
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.ui.theme.*
@@ -72,7 +73,7 @@ fun RecoveryScreen(
     var isRunning by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val logScroll = rememberScrollState()
-    val repo = remember { CoinswapRepository(context.filesDir.absolutePath) }
+    val repo = remember { CoinswapRepository(FfiEnv.takerDataDir(context)) }
     val swapRepo = remember { SwapRepository(repo) }
 
     fun appendLog(line: String) { logs = logs + line }

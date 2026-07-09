@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.MarketRepository
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
@@ -27,7 +28,7 @@ data class MarketsUiState(
 class MarketsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val coinswapRepo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val coinswapRepo = CoinswapRepository(appDataDir = FfiEnv.takerDataDir(app))
     private val marketRepo = MarketRepository(coinswapRepo)
 
     private val _state = MutableStateFlow(

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.SwapRepository
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
@@ -23,7 +24,7 @@ data class SwapReportsUiState(
 class SwapReportsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val coinswapRepo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val coinswapRepo = CoinswapRepository(appDataDir = FfiEnv.takerDataDir(app))
     private val swapRepo = SwapRepository(coinswapRepo)
 
     private val _state = MutableStateFlow(

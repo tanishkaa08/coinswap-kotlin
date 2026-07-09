@@ -65,6 +65,7 @@ class CoinswapRepository(
     )
 
     suspend fun initTaker(session: UserSession): Result<WalletState> = callFfi("Taker.init") {
+        FfiEnv.ensureHome(appDataDir)
         val cfg = session.config
         setupLogging(appDataDir)
         val taker = Taker.init(
@@ -157,7 +158,13 @@ class CoinswapRepository(
         }
 
     suspend fun syncOfferbook(): Result<Unit> = callFfi("syncOfferbookAndWait") {
+        clearOfferbookCache()
         TakerHolder.require().syncOfferbookAndWait()
+    }
+
+    /** Drop cached maker states so a fresh Tor poll runs (fixes stuck offline makers). */
+    fun clearOfferbookCache() {
+        File(appDataDir, "offerbook.json").delete()
     }
 
     suspend fun listMakers(): Result<List<MakerUiModel>> = callFfi("fetchOffers") {

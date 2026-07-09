@@ -43,8 +43,11 @@ class SwapRepository(
             state.utxos.map { u ->
                 SwapUtxo(
                     txid = u.txid,
+                    vout = u.vout,
                     amountSats = u.amountSats,
                     confirmed = (u.confirmations ?: 0) > 0,
+                    spendable = u.spendable,
+                    spendType = u.spendType,
                     selected = true,
                 )
             }
@@ -64,15 +67,22 @@ class SwapRepository(
         if (selectedUtxos.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Select at least one UTXO"))
         }
-        val walletUtxos = coinswap.getBalance().getOrNull()?.utxos.orEmpty()
         val enriched = selectedUtxos.map { u ->
-            val match = walletUtxos.find { it.txid == u.txid }
             UtxoUiModel(
                 txid = u.txid,
-                vout = match?.vout ?: 0,
+                vout = u.vout,
                 amountSats = u.amountSats,
-                confirmations = match?.confirmations,
-                spendable = u.confirmed,
+                confirmations = if (u.confirmed) 1 else 0,
+                spendable = u.spendable,
+                spendType = u.spendType,
+            )
+        }
+        val unusable = enriched.filter { !it.spendable }
+        if (unusable.isNotEmpty()) {
+            return@withContext Result.failure(
+                IllegalStateException(
+                    "Selected UTXOs are locked or tied to an active swap contract",
+                ),
             )
         }
         coinswap.prepareCoinswap(

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerAppConfig
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
@@ -59,7 +60,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val session = remember { UserSession(context) }
-    val repo = remember { CoinswapRepository(context.filesDir.absolutePath) }
+    val repo = remember { CoinswapRepository(FfiEnv.takerDataDir(context)) }
     val caps = remember { repo.getCapabilities() }
     val scope = rememberCoroutineScope()
     val cfg = session.config
@@ -173,7 +174,7 @@ fun SettingsScreen(
             InfoRow("RPC", session.config.rpcUrl)
             InfoRow("ZMQ", session.config.zmqAddr)
             InfoRow("Wallet name", session.walletName)
-            InfoRow("Data directory", context.filesDir.absolutePath)
+            InfoRow("Data directory", FfiEnv.takerDataDir(context))
             InfoRow("Backend", caps.backend)
             CapabilityRow("Wallet init", caps.walletInit)
             CapabilityRow("Sync", caps.walletSync)

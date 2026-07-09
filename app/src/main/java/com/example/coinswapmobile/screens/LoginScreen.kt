@@ -50,6 +50,7 @@ import com.example.coinswapmobile.components.OrbotHelper
 import com.example.coinswapmobile.components.OrbotInstallDialog
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerAppConfig
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.Background
@@ -66,7 +67,7 @@ import kotlinx.coroutines.launch
 fun LoginScreen(onConnected: () -> Unit) {
     val context = LocalContext.current
     val session = remember { UserSession(context) }
-    val repo = remember { CoinswapRepository(context.filesDir.absolutePath) }
+    val repo = remember { CoinswapRepository(FfiEnv.takerDataDir(context)) }
     val scope = rememberCoroutineScope()
     val initial = remember { session.config }
     val demoHost = remember { BuildConfig.DEMO_REGTEST_HOST.trim() }

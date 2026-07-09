@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
@@ -41,7 +42,7 @@ data class WalletUiState(
 class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val repo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val repo = CoinswapRepository(appDataDir = FfiEnv.takerDataDir(app))
 
     private val _uiState = MutableStateFlow(
         WalletUiState(
@@ -121,20 +122,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             connectWallet()
             return
         }
-        viewModelScope.launch {
-            val cfg = session.config
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            repo.getBalance()
-                .onSuccess { state ->
-                    _uiState.update {
-                        it.applyState(state, cfg.rpcUrl, cfg.walletName, cfg.zmqAddr)
-                            .copy(isLoading = false, isInitialized = true, error = null)
-                    }
-                }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
-        }
+        syncWallet()
     }
 
     fun syncWallet() {

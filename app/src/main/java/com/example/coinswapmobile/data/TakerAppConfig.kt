@@ -19,7 +19,8 @@ data class TakerAppConfig(
     val walletPassword: String = "",
     val protocol: String = DEFAULT_PROTOCOL,
 ) {
-    val rpcUrl: String get() = "http://$rpcHost:$rpcPort"
+    /** Host:port only — Rust appends `http://` and `/wallet/{name}`. */
+    val rpcUrl: String get() = "$rpcHost:$rpcPort"
     val zmqAddr: String get() = "tcp://$zmqHost:$zmqPort"
 
     companion object {

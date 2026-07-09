@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.LabeledSwitch
 import com.example.coinswapmobile.components.OrbotHelper
@@ -54,9 +56,12 @@ data class SwapMaker(
 
 data class SwapUtxo(
     val txid: String,
+    val vout: Int,
     val amountSats: Long,
     val confirmed: Boolean,
-    var selected: Boolean
+    val spendable: Boolean = true,
+    val spendType: String? = null,
+    var selected: Boolean,
 )
 
 // ── Network fee tiers ────────────────────────────────────────────────────────
@@ -93,7 +98,7 @@ fun SwapScreen(
     OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
     var amountSats       by remember { mutableStateOf("") }
-    var makerCount       by remember { mutableIntStateOf(2) }
+    var makerCount       by remember { mutableIntStateOf(1) }
     var networkFee       by remember { mutableStateOf(NetworkFee.MEDIUM) }
     var minFidelity      by remember { mutableStateOf("0") }
     var feeRatePerHop    by remember { mutableStateOf("0.10") }
@@ -116,10 +121,11 @@ fun SwapScreen(
         utxos.addAll(vmState.utxos)
     }
 
-    LaunchedEffect(vmState.swapError) {
-        if (vmState.swapError != null) {
-            swapState = SwapState.IDLE
-            swapViewModel.clearSwapResult()
+    LaunchedEffect(vmState.isSwapping, vmState.lastSwapId, vmState.swapError) {
+        if (swapState != SwapState.IN_PROGRESS && swapState != SwapState.DONE) return@LaunchedEffect
+        when {
+            vmState.lastSwapId != null && !vmState.isSwapping && vmState.swapError == null ->
+                swapState = SwapState.DONE
         }
     }
 
@@ -260,7 +266,7 @@ fun SwapScreen(
         // Maker count with 5+ popup dialog
         var showMakerDialog by remember { mutableStateOf(false) }
         var customMakerInput by remember { mutableStateOf("") }
-        val presetCounts = listOf(2, 3, 4, 5)
+        val presetCounts = listOf(1, 2, 3, 4)
         val isCustomSelected = makerCount !in presetCounts
 
         SectionCard {
@@ -316,7 +322,7 @@ fun SwapScreen(
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter number of makers (5-20):",
+                        Text("Enter number of makers (1-20):",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary)
                         OutlinedTextField(
@@ -471,36 +477,90 @@ fun SwapScreen(
         }
 
         if (showUtxoDialog) {
-            AlertDialog(
+            Dialog(
                 onDismissRequest = { showUtxoDialog = false },
-                containerColor   = Surface,
-                title = {
-                    Text("Select UTXOs",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary)
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Tap to toggle. Selected total must cover swap amount.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary)
-                        UtxoGrid(
-                            utxos    = utxos,
-                            onToggle = { i -> utxos[i] = utxos[i].copy(selected = !utxos[i].selected) }
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .fillMaxHeight(0.75f),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Surface,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(20.dp),
+                    ) {
+                        Text(
+                            "Select UTXOs",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
                         )
-                        Text("Total: ${formatSats(selectedUtxoTotal)} sats",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TorActive)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Tap to toggle. Selected total must cover swap amount.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    for (i in utxos.indices) {
+                                        utxos[i] = utxos[i].copy(selected = true)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Select all", style = MaterialTheme.typography.labelSmall) }
+                            OutlinedButton(
+                                onClick = {
+                                    for (i in utxos.indices) {
+                                        utxos[i] = utxos[i].copy(selected = false)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Clear", style = MaterialTheme.typography.labelSmall) }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        val utxoScroll = rememberScrollState()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(utxoScroll),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            utxos.forEachIndexed { index, utxo ->
+                                UtxoListRow(
+                                    utxo = utxo,
+                                    onToggle = {
+                                        utxos[index] = utxos[index].copy(selected = !utxos[index].selected)
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Total: ${formatSats(selectedUtxoTotal)} sats",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TorActive,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            onClick = { showUtxoDialog = false },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = TorActive),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text("Done", color = androidx.compose.ui.graphics.Color.Black)
+                        }
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { showUtxoDialog = false },
-                        colors  = ButtonDefaults.buttonColors(containerColor = TorActive),
-                        shape   = RoundedCornerShape(10.dp)
-                    ) { Text("Done", color = androidx.compose.ui.graphics.Color.Black) }
                 }
-            )
+            }
         }
 
         if (amountSatsLong > 0) {
@@ -620,8 +680,17 @@ fun SwapScreen(
             amountSats    = amountSatsLong,
             isSwapping    = vmState.isSwapping,
             swapFinished  = swapState == SwapState.DONE,
-            onClose       = { swapState = SwapState.IDLE },
-            onViewReport  = { swapState = SwapState.IDLE; onNavigateToReports() }
+            swapPhase     = vmState.swapPhase,
+            swapError     = vmState.swapError,
+            onClose       = {
+                swapState = SwapState.IDLE
+                swapViewModel.clearSwapResult()
+            },
+            onViewReport  = {
+                swapState = SwapState.IDLE
+                swapViewModel.clearSwapResult()
+                onNavigateToReports()
+            }
         )
     }
 }
@@ -680,65 +749,42 @@ private fun HowItWorksStep(num: String, text: String) {
 }
 
 @Composable
-private fun UtxoGrid(utxos: List<SwapUtxo>, onToggle: (Int) -> Unit) {
-    val maxAmount = utxos.maxOfOrNull { it.amountSats } ?: 1L
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        utxos.chunked(2).forEachIndexed { rowIndex, rowUtxos ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                rowUtxos.forEachIndexed { colIndex, utxo ->
-                    val index = rowIndex * 2 + colIndex
-                    val fraction = (utxo.amountSats.toFloat() / maxAmount.toFloat()).coerceIn(0.35f, 1f)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .aspectRatio(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(fraction)
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (utxo.selected) TorActive.copy(0.15f) else SurfaceAlt)
-                                .border(
-                                    1.dp,
-                                    if (utxo.selected) TorActive else Divider,
-                                    RoundedCornerShape(8.dp)
-                                )
-                                .clickable { onToggle(index) }
-                                .padding(8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    formatSats(utxo.amountSats),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextPrimary,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text("sats",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary)
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    utxo.txid,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-                if (rowUtxos.size == 1) {
-                    Spacer(Modifier.weight(1f))
-                }
-            }
+private fun UtxoListRow(utxo: SwapUtxo, onToggle: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (utxo.selected) TorActive.copy(alpha = 0.12f) else SurfaceAlt)
+            .border(
+                1.dp,
+                if (utxo.selected) TorActive else Divider,
+                RoundedCornerShape(10.dp),
+            )
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "${utxo.txid.take(16)}…:${utxo.vout}",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (utxo.confirmed) "Confirmed" else "Unconfirmed",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (utxo.confirmed) TorActive else TextSecondary,
+            )
         }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "${formatSats(utxo.amountSats)} sats",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (utxo.selected) TorActive else TextPrimary,
+        )
     }
 }
 
@@ -1000,19 +1046,21 @@ private fun SwapProgressOverlay(
     amountSats: Long,
     isSwapping: Boolean,
     swapFinished: Boolean,
+    swapPhase: String?,
+    swapError: String?,
     onClose: () -> Unit,
     onViewReport: () -> Unit
 ) {
     var completedHops by remember { mutableIntStateOf(0) }
     val finished = swapFinished
+    val failed = !isSwapping && !finished && swapError != null
     val totalSteps = makerCount + 1
 
     // Animate hop progress while the real swap is running; stop when swap completes
-    LaunchedEffect(isSwapping, swapFinished) {
-        if (!isSwapping && !swapFinished) return@LaunchedEffect
+    LaunchedEffect(isSwapping, swapFinished, failed) {
+        if (!isSwapping && !swapFinished && !failed) return@LaunchedEffect
         completedHops = 0
         if (isSwapping) {
-            // Walk through hops at estimated pace; swap result from ViewModel overrides
             repeat(makerCount) {
                 delay(3_000)
                 if (completedHops < makerCount) completedHops++
@@ -1036,11 +1084,18 @@ private fun SwapProgressOverlay(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val stepLabel = if (finished) "STEP $totalSteps OF $totalSteps  •  SWAP COMPLETE"
-                            else "STEP ${completedHops + 1} OF $totalSteps  •  IN PROGRESS"
+            val stepLabel = when {
+                finished -> "STEP $totalSteps OF $totalSteps  •  SWAP COMPLETE"
+                failed -> "SWAP FAILED"
+                else -> "STEP ${completedHops + 1} OF $totalSteps  •  IN PROGRESS"
+            }
             Text(stepLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (finished) TorActive else TextSecondary)
+                color = when {
+                    finished -> TorActive
+                    failed -> TorInactive
+                    else -> TextSecondary
+                })
             /* View Swap Report removed — access via Reports button on swap screen */
         }
 
@@ -1056,6 +1111,16 @@ private fun SwapProgressOverlay(
                 Text("Swap Complete.",
                     style = MaterialTheme.typography.displaySmall,
                     color = TextPrimary)
+            } else if (failed) {
+                Text("Swap Failed",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TorInactive)
+                Text(
+                    swapError ?: "Unknown error",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
+                )
             } else {
                 Text("Swap in Progress",
                     style = MaterialTheme.typography.titleMedium,
@@ -1064,6 +1129,12 @@ private fun SwapProgressOverlay(
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     textAlign = TextAlign.Center)
+                swapPhase?.let { phase ->
+                    Text(phase,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center)
+                }
             }
 
             // Ring visualization
@@ -1098,6 +1169,17 @@ private fun SwapProgressOverlay(
                             color = TextSecondary,
                             style = MaterialTheme.typography.titleMedium)
                     }
+                }
+            } else if (failed) {
+                OutlinedButton(
+                    onClick  = onClose,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape    = RoundedCornerShape(12.dp),
+                    border   = androidx.compose.foundation.BorderStroke(1.dp, Divider)
+                ) {
+                    Text("Close",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
@@ -23,7 +24,7 @@ data class WalletHistoryUiState(
 class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     private val session = UserSession(app)
-    private val repo = CoinswapRepository(appDataDir = app.filesDir.absolutePath)
+    private val repo = CoinswapRepository(appDataDir = FfiEnv.takerDataDir(app))
 
     private val _state = MutableStateFlow(
         WalletHistoryUiState(capabilities = repo.getCapabilities())

@@ -36,10 +36,7 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
     fun syncWithOrbotCheck() {
-        if (!OrbotHelper.isOrbotInstalled(context)) {
-            showOrbotDialog = true
-            return
-        }
+        // adb reverse to PC Tor works without Orbot running; only block if Tor SOCKS is down.
         marketsViewModel.syncMarketplace()
     }
 
