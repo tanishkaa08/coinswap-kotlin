@@ -117,10 +117,6 @@ fun LoginScreen(onConnected: () -> Unit) {
             error = "Fill RPC, ZMQ, and Tor ports with valid numbers"
             return
         }
-        if (rpcHost == "127.0.0.1" || rpcHost == "localhost") {
-            error = "127.0.0.1 points at the phone; enter server IP"
-            return
-        }
         if (walletName.isBlank()) {
             error = "Enter a wallet name"
             return

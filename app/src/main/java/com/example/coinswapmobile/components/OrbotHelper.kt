@@ -26,7 +26,7 @@ import com.example.coinswapmobile.ui.theme.TorInactive
 
 object OrbotHelper {
     const val ORBOT_PACKAGE = "org.torproject.android"
-    private const val UPTODOWN_WEB = "https://orbot-tor-on-android.en.uptodown.com/android"
+    private const val TORPROJECT_DOWNLOADS = "https://www.torproject.org/download/"
 
     fun isOrbotInstalled(context: Context): Boolean =
         runCatching {
@@ -36,7 +36,7 @@ object OrbotHelper {
         }.getOrDefault(false)
 
     fun openOrbotInstallPage(context: Context) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(UPTODOWN_WEB)).apply {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(TORPROJECT_DOWNLOADS)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
