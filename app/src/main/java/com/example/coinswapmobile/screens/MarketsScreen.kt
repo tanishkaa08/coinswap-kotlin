@@ -236,7 +236,7 @@ private fun MakerDetailSheet(maker: SwapMaker, onDismiss: () -> Unit) {
 
         // Detail rows
         SheetDetailRow("Maker ID",       maker.id)
-        SheetDetailRow("Fee per hop",    "${maker.feeRatePct}%")
+        SheetDetailRow("Fee per maker",  "${maker.feeRatePct}%")
         SheetDetailRow("Min swap",       "%,d sats".format(maker.minSats))
         SheetDetailRow("Max swap",       "%,d sats".format(maker.maxSats))
         SheetDetailRow("Onion address",  maker.onionAddress)

@@ -11,8 +11,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.activity.ComponentActivity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
 import com.example.coinswapmobile.screens.HomeScreen
 import com.example.coinswapmobile.screens.LoginScreen
@@ -136,9 +138,12 @@ fun CoinSwapNavGraph() {
             composable("receive") { ReceiveScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.Markets.route)  { MarketsScreen() }
             composable(Screen.Swap.route) {
+                // Activity-scoped so an in-flight swap survives tab switches.
+                val activity = LocalContext.current as ComponentActivity
                 SwapScreen(
                     onNavigateToReports = { navController.navigate("swap_reports") },
-                    onSwapFailed        = { goToRecovery() }
+                    onSwapFailed        = { goToRecovery() },
+                    swapViewModel       = viewModel(viewModelStoreOwner = activity),
                 )
             }
             composable(Screen.History.route) {

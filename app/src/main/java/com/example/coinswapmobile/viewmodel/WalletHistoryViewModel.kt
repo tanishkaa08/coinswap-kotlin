@@ -8,6 +8,7 @@ import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
+import com.example.coinswapmobile.model.SwapReportUiModel
 import com.example.coinswapmobile.model.TxUiModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 data class WalletHistoryUiState(
     val isLoading: Boolean = false,
     val transactions: List<TxUiModel> = emptyList(),
+    val swaps: List<SwapReportUiModel> = emptyList(),
     val capabilities: NativeCapabilities? = null,
     val errorMessage: String? = null,
 )
@@ -35,23 +37,47 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun load() {
         if (!session.isLoggedIn) {
-            _state.update { it.copy(isLoading = false, transactions = emptyList()) }
+            _state.update { it.copy(isLoading = false, transactions = emptyList(), swaps = emptyList()) }
             return
         }
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, errorMessage = null, capabilities = repo.getCapabilities()) }
+            val showSpinner = _state.value.transactions.isEmpty() && _state.value.swaps.isEmpty()
+            _state.update {
+                it.copy(
+                    isLoading = showSpinner,
+                    errorMessage = null,
+                    capabilities = repo.getCapabilities(),
+                )
+            }
             if (!TakerHolder.isInitialized) {
                 repo.initTaker(session).onFailure { e ->
                     _state.update { it.copy(isLoading = false, errorMessage = e.message) }
                     return@launch
                 }
             }
+            // Disk reports don't need the Taker lock
+            val swaps = repo.listSwapReports().getOrNull()
+                .orEmpty()
+                .distinctBy { it.id }
             repo.listTransactions()
                 .onSuccess { txs ->
-                    _state.update { it.copy(isLoading = false, transactions = txs) }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            transactions = txs,
+                            swaps = swaps,
+                            errorMessage = null,
+                        )
+                    }
                 }
                 .onFailure { e ->
-                    _state.update { it.copy(isLoading = false, transactions = emptyList(), errorMessage = e.message) }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            swaps = swaps,
+                            errorMessage = e.message,
+                        )
+                    }
                 }
         }
     }

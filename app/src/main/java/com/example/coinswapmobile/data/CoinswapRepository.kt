@@ -30,7 +30,7 @@ import java.io.File
 
 /**
  * Thin adapter over generated UniFFI [Taker].
- * UI models ↔ FFI only; wallet/swap behaviour lives in Rust.
+ * Maps UI models to FFI; wallet and swap logic stay in Rust.
  */
 class CoinswapRepository(
     private val appDataDir: String,
@@ -203,6 +203,7 @@ class CoinswapRepository(
         feeRateSatPerVb: Long,
         selectedUtxos: List<UtxoUiModel>,
         makerIds: List<String>,
+        txCount: Int = 1,
         protocol: String = "Legacy",
     ): Result<PreparedSwap> = callFfi("prepareCoinswap") {
         @Suppress("UNUSED_VARIABLE")
@@ -214,7 +215,7 @@ class CoinswapRepository(
             protocol = protocol,
             sendAmount = amountSats.toULong(),
             makerCount = makerCount.toUInt(),
-            txCount = null,
+            txCount = txCount.coerceAtLeast(1).toUInt(),
             requiredConfirms = null,
             manuallySelectedOutpoints = outpoints,
             preferredMakers = makerIds.takeIf { it.isNotEmpty() },
@@ -230,8 +231,8 @@ class CoinswapRepository(
     suspend fun startCoinswap(prepared: PreparedSwap): Result<SwapReportUiModel> =
         callFfi("startCoinswap") {
             val report = TakerHolder.require().startCoinswap(prepared.swapId)
-            val ui = report.toUiModel()
-            persistSwapReport(report)
+            val ui = report.toUiModel(protocol = prepared.protocol)
+            persistSwapReport(report, protocol = prepared.protocol)
             ui
         }
 
@@ -251,7 +252,7 @@ class CoinswapRepository(
     }
 
     /**
-     * UniFFI has no "list recoverable" — look for on-disk swap state, then recovery is
+     * UniFFI has no list-recoverable API. Check on-disk swap state, then
      * [recoverActiveSwap].
      */
     suspend fun detectRecoverableSwaps(): Result<List<RecoverableSwap>> = withContext(Dispatchers.IO) {
@@ -363,13 +364,14 @@ class CoinswapRepository(
         )
     }
 
-    private fun SwapReport.toUiModel(): SwapReportUiModel {
+    private fun SwapReport.toUiModel(protocol: String): SwapReportUiModel {
         val report = this
         val mapped = when {
             report.status.contains("fail", ignoreCase = true) -> SwapReportUiModel.Status.FAILED
             report.status.contains("recover", ignoreCase = true) -> SwapReportUiModel.Status.RECOVERED
             else -> SwapReportUiModel.Status.COMPLETED
         }
+        val makers = (report.makersCount?.toInt() ?: report.makerFeeInfo.size).coerceAtLeast(1)
         return SwapReportUiModel(
             id = report.swapId,
             status = mapped,
@@ -378,17 +380,18 @@ class CoinswapRepository(
             amountSats = report.outgoingAmount,
             outputSats = report.incomingAmount,
             totalFeeSats = kotlin.math.abs(report.feePaid),
-            makerCount = report.makerFeeInfo.size.coerceAtLeast(1),
-            hops = report.makerFeeInfo.size.coerceAtLeast(1),
-            protocol = "TAPROOT",
+            makerCount = makers,
+            hops = makers,
+            protocol = protocol.uppercase(),
             errorMessage = report.errorMessage,
         )
     }
 
-    private fun persistSwapReport(report: SwapReport) {
+    private fun persistSwapReport(report: SwapReport, protocol: String) {
         runCatching {
             val dir = File(appDataDir, "swap_reports").apply { mkdirs() }
             val file = File(dir, "${report.swapId}.json")
+            val makers = (report.makersCount?.toInt() ?: report.makerFeeInfo.size).coerceAtLeast(1)
             val json = JSONObject()
                 .put("swap_id", report.swapId)
                 .put("swapId", report.swapId)
@@ -403,12 +406,12 @@ class CoinswapRepository(
                 .put("outputSats", report.incomingAmount)
                 .put("fee_paid", report.feePaid)
                 .put("totalFeeSats", kotlin.math.abs(report.feePaid))
-                .put("maker_count", report.makerFeeInfo.size)
-                .put("makerCount", report.makerFeeInfo.size)
-                .put("hops", report.makerFeeInfo.size)
+                .put("maker_count", makers)
+                .put("makerCount", makers)
+                .put("hops", makers)
                 .put("error_message", report.errorMessage)
                 .put("errorMessage", report.errorMessage)
-                .put("protocol", "TAPROOT")
+                .put("protocol", protocol.uppercase())
             file.writeText(json.toString())
         }
     }
@@ -438,7 +441,7 @@ class CoinswapRepository(
                         ),
                         makerCount = json.optInt("maker_count", json.optInt("makerCount", 1)),
                         hops = json.optInt("hops", json.optInt("makerCount", 1)),
-                        protocol = json.optString("protocol", "TAPROOT"),
+                        protocol = json.optString("protocol", "LEGACY"),
                         errorMessage = json.optString("error_message", json.optString("errorMessage"))
                             .takeIf { it.isNotBlank() },
                     )

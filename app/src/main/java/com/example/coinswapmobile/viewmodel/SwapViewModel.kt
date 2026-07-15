@@ -74,10 +74,10 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             }
             coinswapRepo.getBalance()
                 .onSuccess { state ->
+                    // SeedCoin / SweptCoin only (IncomingSwapCoin is unsweepable here)
                     val utxos = state.utxos
                         .filter { u ->
-                            u.spendable &&
-                                (u.spendType == "SeedCoin" || u.spendType == "IncomingSwapCoin" || u.spendType == "SweptCoin")
+                            u.spendable && (u.spendType == "SeedCoin" || u.spendType == "SweptCoin")
                         }
                         .map { u ->
                             SwapUtxo(
@@ -124,6 +124,8 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         makerCount: Int,
         feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
+        txCount: Int = 1,
+        manual: Boolean = false,
         makerIds: List<String> = emptyList(),
         protocol: String = session.config.protocol,
     ) {
@@ -141,9 +143,19 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            if (selectedUtxos.isEmpty()) {
-                _state.update { it.copy(swapError = "Select at least one UTXO") }
-                return@launch
+            // Manual mode: require a selection from a single pool
+            if (manual) {
+                if (selectedUtxos.isEmpty()) {
+                    _state.update { it.copy(swapError = "Select at least one coin") }
+                    return@launch
+                }
+                val pools = selectedUtxos.map { poolOf(it.spendType) }.toSet()
+                if (pools.size > 1) {
+                    _state.update {
+                        it.copy(swapError = "Cannot mix regular and swap coins. Use one pool.")
+                    }
+                    return@launch
+                }
             }
             _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing wallet…") }
             coinswapRepo.syncWallet()
@@ -151,19 +163,20 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(isSwapping = false, swapError = e.message) }
                     return@launch
                 }
-            val freshUtxos = coinswapRepo.getBalance().getOrNull()?.utxos.orEmpty()
-            val invalid = selectedUtxos.filter { sel ->
-                freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
-            }
-            if (invalid.isNotEmpty()) {
-                _state.update {
-                    it.copy(
-                        isSwapping = false,
-                        swapError = "Selected coins are locked or tied to a previous swap. " +
-                            "Check Reports → Recovery, sync wallet, then pick different UTXOs.",
-                    )
+            if (manual) {
+                val freshUtxos = coinswapRepo.getBalance().getOrNull()?.utxos.orEmpty()
+                val invalid = selectedUtxos.filter { sel ->
+                    freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
                 }
-                return@launch
+                if (invalid.isNotEmpty()) {
+                    _state.update {
+                        it.copy(
+                            isSwapping = false,
+                            swapError = "Selected coins are locked or tied to a previous swap. Sync and pick different coins.",
+                        )
+                    }
+                    return@launch
+                }
             }
             _state.update { it.copy(swapPhase = "Syncing offerbook…") }
             coinswapRepo.syncOfferbook()
@@ -173,6 +186,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 makerCount = makerCount,
                 feeRateSatPerVb = feeRateSatPerVb,
                 selectedUtxos = selectedUtxos,
+                txCount = txCount,
                 makerIds = makerIds,
                 protocol = protocol,
             )
@@ -211,4 +225,8 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     fun clearSwapResult() {
         _state.update { it.copy(swapError = null, swapPhase = null, lastSwapId = null) }
     }
+
+    /** SeedCoin -> regular; otherwise swap pool. */
+    private fun poolOf(spendType: String?): String =
+        if (spendType == null || spendType == "SeedCoin") "regular" else "swap"
 }

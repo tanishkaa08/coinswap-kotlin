@@ -103,7 +103,7 @@ fun OrbotPromptBanner(
     onInstallClick: () -> Unit,
 ) {
     Text(
-        "Install Orbot to enable Tor.",
+        "Tor SOCKS unreachable. Check USB and Tor reverse.",
         color = TorInactive,
         style = MaterialTheme.typography.labelSmall,
         modifier = modifier

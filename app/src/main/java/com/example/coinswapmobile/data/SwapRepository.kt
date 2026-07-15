@@ -58,15 +58,14 @@ class SwapRepository(
         makerCount: Int,
         feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
+        txCount: Int = 1,
         makerIds: List<String> = emptyList(),
         protocol: String = "Legacy",
     ): Result<PreparedSwap> = withContext(Dispatchers.IO) {
         if (amountSats <= 0) {
             return@withContext Result.failure(IllegalArgumentException("Amount must be positive"))
         }
-        if (selectedUtxos.isEmpty()) {
-            return@withContext Result.failure(IllegalArgumentException("Select at least one UTXO"))
-        }
+        // Empty selection means automatic coin selection.
         val enriched = selectedUtxos.map { u ->
             UtxoUiModel(
                 txid = u.txid,
@@ -90,6 +89,7 @@ class SwapRepository(
             makerCount = makerCount,
             feeRateSatPerVb = feeRateSatPerVb.toLong(),
             selectedUtxos = enriched,
+            txCount = txCount,
             makerIds = makerIds,
             protocol = protocol,
         )

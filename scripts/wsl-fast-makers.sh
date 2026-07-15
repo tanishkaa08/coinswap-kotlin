@@ -14,7 +14,8 @@ IMAGE_NAME="${IMAGE_NAME:-coinswap}"
 FUND_BTC="${FUND_BTC:-0.01}"
 MARKER_DIR="/tmp/coinswap-maker-funded"
 export BITCOIN_RPC_AUTH="${BITCOIN_RPC_USER}:${BITCOIN_RPC_PASSWORD}"
-export BITCOIN_RPC_HOST="${EXTERNAL_BITCOIND_HOST:-host.docker.internal:18442}"
+# Makers use --network host, so hit bitcoind on the WSL loopback (not host.docker.internal).
+export BITCOIN_RPC_HOST="${BITCOIN_RPC_HOST:-127.0.0.1:${BITCOIN_RPC_PORT:-18442}}"
 
 NET_PORTS=(6104 6110 6120 6130 6140)
 RPC_PORTS=(6103 6111 6121 6131 6141)
@@ -116,6 +117,7 @@ bash "$SCRIPTS/wsl-setup-tor-for-phone.sh" | tail -8
 
 echo "==> [2/5] Miner coins..."
 cli createwallet miner 2>/dev/null || true
+cli loadwallet miner 2>/dev/null || true
 BAL=$(cli -rpcwallet=miner getbalance 2>/dev/null || echo 0)
 if awk "BEGIN {exit !($BAL < 1)}"; then
   A=$(cli -rpcwallet=miner getnewaddress)

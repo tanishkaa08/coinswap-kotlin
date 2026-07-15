@@ -87,7 +87,7 @@ fun SwapReportsScreen(
             }
         }
 
-        // Stats grid — row 1: counts, row 2: amounts
+        // Stats grid
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -100,7 +100,7 @@ fun SwapReportsScreen(
             ) {
                 StatCard("Total",    "$totalReports",          Modifier.weight(1f))
                 StatCard("Failed",   "$failedCount",           Modifier.weight(1f), AccentAmber)
-                StatCard("Avg Hops", "%.1f".format(avgHops),  Modifier.weight(1f))
+                StatCard("Avg Makers", "%.1f".format(avgHops),  Modifier.weight(1f))
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -199,7 +199,7 @@ private fun SwapReportRow(report: SwapReport) {
         // Badges row
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatusBadge(report.status)
-            Badge("${report.hops} HOPS", TorActive)
+            Badge("${report.makerCount} MAKERS", TorActive)
             Badge(report.protocol, AccentPurple)
         }
 
