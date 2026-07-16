@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 
-enum class RecoveryUiState { InProgress, Complete, Failed, Idle }
+enum class RecoveryUiState { InProgress, Complete, Failed }
 
 data class SwapRecoveryInfo(
     val failed: Boolean,
@@ -144,8 +144,7 @@ fun RecoveryScreen(
         val borderColor = when (uiState) {
             RecoveryUiState.Complete -> TorActive
             RecoveryUiState.Failed -> TorInactive
-            RecoveryUiState.Idle -> TextSecondary
-            else -> AccentAmber
+            RecoveryUiState.InProgress -> AccentAmber
         }
         Column(
             modifier = Modifier
@@ -176,11 +175,6 @@ fun RecoveryScreen(
                     Text("Recovery complete",
                         style = MaterialTheme.typography.titleMedium,
                         color = TorActive)
-                }
-                RecoveryUiState.Idle -> {
-                    Text("No recovery needed",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextSecondary)
                 }
                 RecoveryUiState.Failed -> {
                     Text("Recovery did not complete",
@@ -227,7 +221,7 @@ fun RecoveryScreen(
                             style = MaterialTheme.typography.titleMedium)
                     }
                 }
-                RecoveryUiState.Idle, RecoveryUiState.Failed -> {
+                RecoveryUiState.Failed -> {
                     OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)

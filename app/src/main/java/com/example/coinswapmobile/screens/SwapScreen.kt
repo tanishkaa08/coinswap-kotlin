@@ -15,7 +15,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +26,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -734,57 +732,6 @@ fun SwapScreen(
 // ── Sub-composables ──────────────────────────────────────────────────────────
 
 @Composable
-private fun HowItWorksBanner() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Surface)
-            .padding(14.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(Icons.Default.Info, null, tint = TorActive, modifier = Modifier.size(16.dp))
-                Text("How Coinswap works",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary)
-            }
-            HowItWorksStep("1", "Your coins are sent to Maker 1's swap address")
-            HowItWorksStep("2", "Each maker atomically forwards to the next maker")
-            HowItWorksStep("3", "Final maker sends fresh coins to your destination")
-            HowItWorksStep("4", "All communication is encrypted so no one sees the full route")
-        }
-    }
-}
-
-@Composable
-private fun HowItWorksStep(num: String, text: String) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top
-    ) {
-        Box(
-            modifier = Modifier
-                .size(18.dp)
-                .clip(CircleShape)
-                .background(TorActive.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(num,
-                style = MaterialTheme.typography.labelSmall,
-                color = TorActive)
-        }
-        Text(text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
-            modifier = Modifier.weight(1f))
-    }
-}
-
-@Composable
 private fun UtxoListRow(utxo: SwapUtxo, onToggle: () -> Unit) {
     Row(
         modifier = Modifier
@@ -943,70 +890,6 @@ private fun ExpandableSection(
                 content = content
             )
         }
-    }
-}
-
-@Composable
-private fun RoutePreview(makers: List<SwapMaker>, amountSats: Long) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        RouteNode("YOU", "Send ${formatSats(amountSats)} sats", TorActive, isFirst = true)
-        makers.forEachIndexed { i, maker ->
-            RouteArrow()
-            RouteNode("MAKER ${i + 1}", maker.id, AccentPurple)
-        }
-        RouteArrow()
-        RouteNode(
-            "YOU",
-            "Receive ≈${formatSats(amountSats - 1500L * makers.size)} sats (new address)",
-            TorActive,
-            isLast = true
-        )
-        Spacer(Modifier.height(4.dp))
-        Text("Each arrow = 1 atomic swap. No maker sees the full path.",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary)
-    }
-}
-
-@Composable
-private fun RouteNode(
-    label: String,
-    sub: String,
-    color: androidx.compose.ui.graphics.Color,
-    isFirst: Boolean = false,
-    isLast: Boolean = false
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.10f))
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(8.dp).clip(CircleShape).background(color)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(label, style = MaterialTheme.typography.labelSmall, color = color)
-            Text(sub, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
-        }
-    }
-}
-
-@Composable
-private fun RouteArrow() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("↓  encrypted  ↓",
-            style = MaterialTheme.typography.labelSmall,
-            color = AccentPurple)
     }
 }
 
@@ -1274,7 +1157,6 @@ private fun SwapRingVisualization(
             sub    = if (sendDone) "Funds sent" else "Preparing…",
             done   = sendDone,
             active = stage == SwapStage.PREPARING,
-            isLast = false,
             color  = if (sendDone) TorActive else AccentPurple
         )
 
@@ -1292,7 +1174,6 @@ private fun SwapRingVisualization(
                 },
                 done   = done,
                 active = active,
-                isLast = hop == makerCount,
                 color  = when {
                     done   -> TorActive
                     active -> AccentPurple
@@ -1312,7 +1193,6 @@ private fun SwapRingVisualization(
             },
             done   = finished,
             active = swapping,
-            isLast = true,
             color  = when {
                 finished -> TorActive
                 swapping -> AccentPurple
@@ -1325,7 +1205,7 @@ private fun SwapRingVisualization(
 @Composable
 private fun StepNode(
     label: String, sub: String, done: Boolean, active: Boolean,
-    isLast: Boolean, color: androidx.compose.ui.graphics.Color
+    color: androidx.compose.ui.graphics.Color
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),

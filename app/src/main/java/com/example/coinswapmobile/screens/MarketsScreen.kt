@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.OrbotHelper
 import com.example.coinswapmobile.components.OrbotInstallDialog
+import com.example.coinswapmobile.components.OrbotPromptBanner
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.MarketsViewModel
 
@@ -35,8 +36,20 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
 
     OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
+    fun promptOrbotOrOpen() {
+        if (OrbotHelper.isOrbotInstalled(context)) {
+            OrbotHelper.openOrbotApp(context)
+        } else {
+            showOrbotDialog = true
+        }
+    }
+
     fun syncWithOrbotCheck() {
-        // adb reverse to PC Tor works without Orbot running; only block if Tor SOCKS is down.
+        // adb reverse to PC Tor works without Orbot; only prompt when SOCKS is down.
+        if (!vmState.torReachable) {
+            promptOrbotOrOpen()
+            if (!OrbotHelper.isOrbotInstalled(context)) return
+        }
         marketsViewModel.syncMarketplace()
     }
 
@@ -72,6 +85,12 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
                         style = MaterialTheme.typography.labelSmall,
                         color = TorActive)
                 }
+            }
+        }
+
+        if (!vmState.torReachable) {
+            item {
+                OrbotPromptBanner(onInstallClick = { promptOrbotOrOpen() })
             }
         }
 
