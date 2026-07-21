@@ -139,12 +139,16 @@ fun CoinSwapNavGraph() {
             composable(Screen.Markets.route)  { MarketsScreen() }
             composable(Screen.Swap.route) {
                 // Activity-scoped so an in-flight swap survives tab switches.
-                val activity = LocalContext.current as ComponentActivity
-                SwapScreen(
-                    onNavigateToReports = { navController.navigate("swap_reports") },
-                    onSwapFailed        = { goToRecovery() },
-                    swapViewModel       = viewModel(viewModelStoreOwner = activity),
-                )
+                val activity = LocalContext.current as? ComponentActivity
+                if (activity == null) {
+                    Text("Swap unavailable outside an activity host.")
+                } else {
+                    SwapScreen(
+                        onNavigateToReports = { navController.navigate("swap_reports") },
+                        onSwapFailed        = { goToRecovery() },
+                        swapViewModel       = viewModel(viewModelStoreOwner = activity),
+                    )
+                }
             }
             composable(Screen.History.route) {
                 WalletHistoryScreen()

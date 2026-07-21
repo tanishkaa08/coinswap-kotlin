@@ -2,12 +2,16 @@ package com.example.coinswapmobile.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
 /**
  * Connectivity probes for Tor SOCKS and control ports.
- * FFI Taker.init hardcodes SOCKS 9050 on the Rust side; control port is passed through.
+ *
+ * UniFFI [org.coinswap.Taker.init] hardcodes SOCKS `127.0.0.1:9050` on the Rust side;
+ * preflight always targets that endpoint so a green check matches what swaps actually use.
  */
 object TorManager {
 
@@ -18,19 +22,57 @@ object TorManager {
         val message: String,
     )
 
+    /** Always probes the UniFFI SOCKS endpoint (ignores alternate configured host/port). */
     suspend fun checkSocks(
-        host: String = TakerAppConfig.DEFAULT_SOCKS_HOST,
-        port: Int = TakerAppConfig.DEFAULT_SOCKS_PORT,
+        @Suppress("UNUSED_PARAMETER") host: String = TakerAppConfig.DEFAULT_SOCKS_HOST,
+        @Suppress("UNUSED_PARAMETER") port: Int = TakerAppConfig.DEFAULT_SOCKS_PORT,
         timeoutMs: Int = 5_000,
-    ): PortStatus = checkPort(host, port, "Tor SOCKS", timeoutMs)
+    ): PortStatus = checkSocksHandshake(
+        host = TakerAppConfig.DEFAULT_SOCKS_HOST,
+        port = TakerAppConfig.DEFAULT_SOCKS_PORT,
+        timeoutMs = timeoutMs,
+    )
 
     suspend fun checkControl(
         host: String = TakerAppConfig.DEFAULT_SOCKS_HOST,
         port: Int = TakerAppConfig.DEFAULT_TOR_CONTROL,
         timeoutMs: Int = 5_000,
-    ): PortStatus = checkPort(host, port, "Tor control", timeoutMs)
+    ): PortStatus = checkTcp(host, port, "Tor control", timeoutMs)
 
-    private suspend fun checkPort(
+    private suspend fun checkSocksHandshake(
+        host: String,
+        port: Int,
+        timeoutMs: Int,
+    ): PortStatus = withContext(Dispatchers.IO) {
+        runCatching {
+            Socket().use { socket ->
+                socket.soTimeout = timeoutMs
+                socket.connect(InetSocketAddress(host, port), timeoutMs)
+                DataOutputStream(socket.getOutputStream()).use { out ->
+                    // SOCKS5 greeting: VER=5, NMETHODS=1, METHOD=0 (no auth)
+                    out.write(byteArrayOf(0x05, 0x01, 0x00))
+                    out.flush()
+                }
+                DataInputStream(socket.getInputStream()).use { inp ->
+                    val ver = inp.read()
+                    val method = inp.read()
+                    if (ver != 0x05 || method == 0xFF || method < 0) {
+                        error("SOCKS5 handshake rejected (ver=$ver method=$method)")
+                    }
+                }
+            }
+            PortStatus(true, host, port, "Tor SOCKS reachable at $host:$port")
+        }.getOrElse { e ->
+            PortStatus(
+                false,
+                host,
+                port,
+                "Tor SOCKS not reachable at $host:$port (${e.message})",
+            )
+        }
+    }
+
+    private suspend fun checkTcp(
         host: String,
         port: Int,
         label: String,

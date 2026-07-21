@@ -189,6 +189,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 txCount = txCount,
                 makerIds = makerIds,
                 protocol = protocol,
+                manualSelection = manual,
             )
                 .onSuccess { prepared ->
                     _state.update {

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Flat monochrome glyph for themed icons (no gradients/shadows). -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M30,54 L48,36 L48,48 L78,48 L78,60 L48,60 L48,72 Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M78,54 L60,72 L60,60 L30,60 L30,48 L60,48 L60,36 Z" />
+</vector>

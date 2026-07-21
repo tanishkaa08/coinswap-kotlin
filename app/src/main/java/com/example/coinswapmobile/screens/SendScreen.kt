@@ -139,10 +139,6 @@ fun SendScreen(
             }
         }
 
-        vmState.error?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = TorInactive)
-        }
-
         vmState.lastResult?.let { result ->
             SectionCard {
                 SectionLabel("BROADCAST SUCCESS")

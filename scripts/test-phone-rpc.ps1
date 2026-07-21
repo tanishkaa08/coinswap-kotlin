@@ -3,17 +3,17 @@ param(
     [string]$Device = "RZCW40SG3NN"
 )
 
-$adb = "adb"
-if ($Device) { $adb += " -s $Device" }
+$adbArgs = @()
+if ($Device) { $adbArgs += @("-s", $Device) }
 
 $jsonPath = Join-Path $PSScriptRoot "rpc-test.json"
 $remotePath = "/data/local/tmp/rpc-test.json"
 
 Write-Host "Pushing test JSON to phone..."
-Invoke-Expression "$adb push `"$jsonPath`" $remotePath"
+& adb @adbArgs push $jsonPath $remotePath
 
 Write-Host "Calling bitcoind via adb reverse (127.0.0.1:18442 on phone -> PC)..."
-$result = Invoke-Expression "$adb shell `"curl -s -u user:password -H content-type:text/plain --data-binary @$remotePath http://127.0.0.1:18442/`""
+$result = & adb @adbArgs shell "curl -s -u user:password -H content-type:text/plain --data-binary @$remotePath http://127.0.0.1:18442/"
 
 Write-Host $result
 

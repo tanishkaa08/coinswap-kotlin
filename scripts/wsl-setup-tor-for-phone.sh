@@ -42,10 +42,18 @@ EOF
   "
 
 echo "Waiting for tor bootstrap..."
+BOOTSTRAPPED=0
 for i in $(seq 1 45); do
-  docker logs coinswap-tor 2>&1 | grep -q "Bootstrapped 100%" && break
+  if docker logs coinswap-tor 2>&1 | grep -q "Bootstrapped 100%"; then
+    BOOTSTRAPPED=1
+    break
+  fi
   sleep 2
 done
+if [[ "$BOOTSTRAPPED" -ne 1 ]]; then
+  echo "ERROR: Tor did not bootstrap within 90s. Check: docker logs coinswap-tor" >&2
+  exit 1
+fi
 
 echo "==> Bridge relay ${RELAY_SOCKS}/${RELAY_CONTROL} -> ${BRIDGE_IP}:${BRIDGE_SOCKS}/${BRIDGE_CONTROL}..."
 docker run -d --name coinswap-tor-relay \

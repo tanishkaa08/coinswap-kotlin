@@ -12,7 +12,9 @@ import com.example.coinswapmobile.model.SwapStatusUi
 import com.example.coinswapmobile.model.TxUiModel
 import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.model.WalletState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.coinswap.AddressType
 import org.coinswap.MakerOfferCandidate
@@ -64,24 +66,34 @@ class CoinswapRepository(
         missingApis = emptyList(),
     )
 
-    suspend fun initTaker(session: UserSession): Result<WalletState> = callFfi("Taker.init") {
-        FfiEnv.ensureHome(appDataDir)
-        val cfg = session.config
-        setupLogging(appDataDir)
-        val taker = Taker.init(
-            dataDir = appDataDir,
-            walletFileName = cfg.walletName,
-            rpcConfig = session.toRpcConfig(),
-            controlPort = cfg.torControlPort.toUShort(),
-            torAuthPassword = cfg.torAuthPassword.ifBlank { null },
-            zmqAddr = cfg.zmqAddr,
-            password = cfg.walletPassword.ifBlank { null },
-        )
-        TakerHolder.set(taker)
-        runCatching { taker.lockUnspendableUtxos() }
-        taker.syncAndSave()
-        snapshotWallet(taker)
-    }
+    suspend fun initTaker(session: UserSession): Result<WalletState> =
+        TakerHolder.initMutex.withLock {
+            callFfi("Taker.init") {
+                FfiEnv.ensureHome(appDataDir)
+                val cfg = session.config
+                setupLogging(appDataDir)
+                val taker = Taker.init(
+                    dataDir = appDataDir,
+                    walletFileName = cfg.walletName,
+                    rpcConfig = session.toRpcConfig(),
+                    controlPort = cfg.torControlPort.toUShort(),
+                    torAuthPassword = cfg.torAuthPassword.ifBlank { null },
+                    zmqAddr = cfg.zmqAddr,
+                    password = cfg.walletPassword.ifBlank { null },
+                )
+                try {
+                    runCatching { taker.lockUnspendableUtxos() }
+                    taker.syncAndSave()
+                    val state = snapshotWallet(taker)
+                    // Only publish after sync succeeds so callers never see a half-init Taker.
+                    TakerHolder.set(taker)
+                    state
+                } catch (e: Throwable) {
+                    runCatching { taker.close() }
+                    throw e
+                }
+            }
+        }
 
     suspend fun restoreWallet(
         session: UserSession,
@@ -131,7 +143,9 @@ class CoinswapRepository(
             feeRate = feeRateSatPerVb.toDouble(),
             manuallySelectedOutpoints = selected,
         )
-        SendResult(txid = txid.value, amountSats = amountSats)
+        // Estimate fee from rate × typical P2WPKH tx size (matches SendScreen).
+        val feeSats = (feeRateSatPerVb * 225L).coerceAtLeast(0)
+        SendResult(txid = txid.value, amountSats = amountSats, feeSats = feeSats)
     }
 
     suspend fun listTransactions(count: Int = 50, skip: Int = 0): Result<List<TxUiModel>> =
@@ -389,6 +403,7 @@ class CoinswapRepository(
 
     private fun persistSwapReport(report: SwapReport, protocol: String) {
         runCatching {
+            if (!isSafeSwapId(report.swapId)) return@runCatching
             val dir = File(appDataDir, "swap_reports").apply { mkdirs() }
             val file = File(dir, "${report.swapId}.json")
             val makers = (report.makersCount?.toInt() ?: report.makerFeeInfo.size).coerceAtLeast(1)
@@ -453,14 +468,25 @@ class CoinswapRepository(
 
     private suspend fun <T> callFfi(operation: String, block: () -> T): Result<T> =
         withContext(Dispatchers.IO) {
-            runCatching { block() }.fold(
-                onSuccess = { Result.success(it) },
-                onFailure = { e ->
-                    val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
-                    Result.failure(IllegalStateException("$operation failed: $detail", e))
-                },
-            )
+            try {
+                Result.success(block())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
+                Result.failure(IllegalStateException("$operation failed: $detail", e))
+            }
         }
+
+    companion object {
+        /** Reject path traversal / separators before using swapId as a filename. */
+        fun isSafeSwapId(swapId: String): Boolean {
+            if (swapId.isBlank()) return false
+            if (swapId.contains('/') || swapId.contains('\\')) return false
+            if (swapId.contains("..")) return false
+            return true
+        }
+    }
 }
 
 class NativeCallException(val nativeError: NativeError) : Exception(nativeError.message)

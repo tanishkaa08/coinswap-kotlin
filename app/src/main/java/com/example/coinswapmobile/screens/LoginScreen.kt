@@ -124,27 +124,30 @@ fun LoginScreen(onConnected: () -> Unit) {
         }
         connecting = true
         error = null
-        session.saveConfig(
-            TakerAppConfig(
-                rpcHost = rpcHost.trim(),
-                rpcPort = port,
-                rpcUsername = rpcUser,
-                rpcPassword = rpcPass,
-                zmqHost = zmqHost.trim(),
-                zmqPort = zPort,
-                torControlPort = cPort,
-                torSocksHost = socksHost.trim(),
-                torSocksPort = sPort,
-                torAuthPassword = torAuth,
-                walletName = walletName.trim(),
-                walletPassword = walletPassword,
-            )
+        val cfg = TakerAppConfig(
+            rpcHost = rpcHost.trim(),
+            rpcPort = port,
+            rpcUsername = rpcUser,
+            rpcPassword = rpcPass,
+            zmqHost = zmqHost.trim(),
+            zmqPort = zPort,
+            torControlPort = cPort,
+            torSocksHost = socksHost.trim(),
+            torSocksPort = sPort,
+            torAuthPassword = torAuth,
+            walletName = walletName.trim(),
+            walletPassword = walletPassword,
         )
+        // Persist settings but stay logged out until Taker.init succeeds.
+        session.saveConfig(cfg, markLoggedIn = false)
         scope.launch {
             val result = repo.initTaker(session)
             connecting = false
             result
-                .onSuccess { onConnected() }
+                .onSuccess {
+                    session.saveConfig(cfg, markLoggedIn = true)
+                    onConnected()
+                }
                 .onFailure { e ->
                     error = e.message ?: "Taker.init failed"
                 }

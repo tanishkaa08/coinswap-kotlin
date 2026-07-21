@@ -4,8 +4,11 @@ param([string]$WslDistro = "Ubuntu")
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Host "Re-launching as Administrator..."
-    Start-Process powershell -Verb RunAs -ArgumentList "-File `"$PSCommandPath`"" -Wait
-    exit $LASTEXITCODE
+    $proc = Start-Process powershell -Verb RunAs -PassThru -Wait -ArgumentList @(
+        "-File", "`"$PSCommandPath`"",
+        "-WslDistro", "`"$WslDistro`""
+    )
+    exit $proc.ExitCode
 }
 
 $wslIp = (wsl -d $WslDistro hostname -I).Trim().Split(" ")[0]

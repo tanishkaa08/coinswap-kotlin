@@ -8,7 +8,7 @@ android {
     namespace = "com.example.coinswapmobile"
     compileSdk = 35
 
-    val demoRegtestHost = (project.findProperty("demoRegtestHost") as String?)?.trim().orEmpty()
+    val demoRegtestHost = (project.findProperty("demoRegtestHost") as? String)?.trim().orEmpty()
 
     defaultConfig {
         applicationId = "com.example.coinswapmobile"
@@ -36,11 +36,18 @@ android {
     }
 
     // Generated UniFFI Kotlin + native libs from coinswap-ffi (do not edit those files).
-    // Path is relative to this module (:app), so ../ goes to D:/dev then into coinswap-ffi.
-    val ffiLibRoot = rootProject.file("../coinswap-ffi/coinswap-kotlin/lib")
+    // Default: sibling checkout ../coinswap-ffi. Override with -PcoinswapFfiRoot=/path/to/coinswap-ffi
+    val coinswapFfiRootProp = (project.findProperty("coinswapFfiRoot") as? String)?.trim().orEmpty()
+    val ffiCheckout = if (coinswapFfiRootProp.isNotEmpty()) {
+        rootProject.file(coinswapFfiRootProp)
+    } else {
+        rootProject.file("../coinswap-ffi")
+    }
+    val ffiLibRoot = ffiCheckout.resolve("coinswap-kotlin/lib")
     require(ffiLibRoot.resolve("src/main/kotlin/org/coinswap/coinswap.kt").isFile) {
         "Missing generated UniFFI sources at ${ffiLibRoot.absolutePath}. " +
-            "Expected sibling checkout at D:/dev/coinswap-ffi with coinswap.kt generated."
+            "Expected coinswap-ffi checkout (sibling ../coinswap-ffi or -PcoinswapFfiRoot=...). " +
+            "Generate bindings before building."
     }
     sourceSets {
         getByName("main") {
@@ -93,6 +100,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // Required by generated UniFFI Kotlin (loads libcoinswap_ffi via JNA)
     implementation("net.java.dev.jna:jna:5.13.0@aar")

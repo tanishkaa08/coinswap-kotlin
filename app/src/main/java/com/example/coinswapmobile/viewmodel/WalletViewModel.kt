@@ -11,6 +11,7 @@ import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.model.WalletState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -55,6 +56,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     )
     val uiState = _uiState.asStateFlow()
 
+    private var connectJob: Job? = null
+    private var syncJob: Job? = null
+
     init {
         if (session.isLoggedIn) {
             if (TakerHolder.isInitialized) {
@@ -68,7 +72,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     /** Initialize / reconnect UniFFI Taker (RPC+ZMQ+Tor). Tor SOCKS is soft-checked only. */
     fun connectWallet() {
         if (!session.isLoggedIn) return
-        viewModelScope.launch {
+        connectJob?.cancel()
+        connectJob = viewModelScope.launch {
             val cfg = session.config
             val tor = TorManager.checkSocks(cfg.torSocksHost, cfg.torSocksPort)
             _uiState.update {
@@ -131,7 +136,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             connectWallet()
             return
         }
-        viewModelScope.launch {
+        syncJob?.cancel()
+        syncJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             val cfg = session.config
             repo.syncWallet()

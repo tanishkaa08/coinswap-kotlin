@@ -61,11 +61,17 @@ class SwapRepository(
         txCount: Int = 1,
         makerIds: List<String> = emptyList(),
         protocol: String = "Legacy",
+        manualSelection: Boolean = false,
     ): Result<PreparedSwap> = withContext(Dispatchers.IO) {
         if (amountSats <= 0) {
             return@withContext Result.failure(IllegalArgumentException("Amount must be positive"))
         }
-        // Empty selection means automatic coin selection.
+        if (manualSelection && selectedUtxos.isEmpty()) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Select at least one coin for manual coin control"),
+            )
+        }
+        // Automatic mode: empty list → Rust picks coins. Manual mode: pass explicit outpoints.
         val enriched = selectedUtxos.map { u ->
             UtxoUiModel(
                 txid = u.txid,

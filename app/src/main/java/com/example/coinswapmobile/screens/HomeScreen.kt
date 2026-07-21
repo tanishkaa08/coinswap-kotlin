@@ -28,18 +28,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.OrbotHelper
 import com.example.coinswapmobile.components.OrbotInstallDialog
 import com.example.coinswapmobile.components.OrbotPromptBanner
+import com.example.coinswapmobile.components.PrivacyLevel
+import com.example.coinswapmobile.components.TorStatusBadge
+import com.example.coinswapmobile.components.UtxoCard
+import com.example.coinswapmobile.components.UtxoItem
 import com.example.coinswapmobile.model.UtxoUiModel
-import com.example.coinswapmobile.ui.components.PrivacyLevel
-import com.example.coinswapmobile.ui.components.TorStatusBadge
-import com.example.coinswapmobile.ui.components.UtxoCard
-import com.example.coinswapmobile.ui.components.UtxoItem
 import com.example.coinswapmobile.ui.theme.*
+import com.example.coinswapmobile.viewmodel.WalletUiState
 import com.example.coinswapmobile.viewmodel.WalletViewModel
 
 @Composable
 fun HomeScreen(
-    onSendClick: () -> Unit,
-    onReceiveClick: () -> Unit,
+    onSendClick: () -> Unit = {},
+    onReceiveClick: () -> Unit = {},
     walletViewModel: WalletViewModel = viewModel(),
 ) {
     val uiState by walletViewModel.uiState.collectAsState()
@@ -47,11 +48,13 @@ fun HomeScreen(
     val context = LocalContext.current
     var showOrbotDialog by remember { mutableStateOf(false) }
 
-    // Refresh balances/UTXOs on resume so state stays current without an app restart.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) walletViewModel.refreshBalances()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                walletViewModel.refreshBalances()
+                walletViewModel.refreshTorStatus()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -67,41 +70,13 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("COINSWAP",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TorActive)
-                Spacer(Modifier.weight(1f))
-                TorStatusBadge(isActive = uiState.torReachable && uiState.isInitialized)
-            }
-        }
-
-        item {
-            Text(
-                if (uiState.backendLabel.isNotBlank()) uiState.backendLabel
-                else "Bitcoin Core RPC • not connected",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-        }
-
-        if (!uiState.isInitialized && uiState.libraryLoadStatus.isNotBlank()) {
-            item {
-                Text(
-                    uiState.libraryLoadStatus,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-            }
-        }
-
-        uiState.error?.let { message ->
-            item {
-                Text("⚠  $message",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TorInactive)
-            }
+            HomeTorHeader(
+                backendLabel = uiState.backendLabel,
+                libraryLoadStatus = uiState.libraryLoadStatus,
+                isInitialized = uiState.isInitialized,
+                torActive = uiState.torReachable && uiState.isInitialized,
+                error = uiState.error,
+            )
         }
 
         if (uiState.isInitialized && !uiState.torReachable) {
@@ -119,98 +94,157 @@ fun HomeScreen(
         }
 
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Surface)
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("TOTAL BALANCE",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-
-                AnimatedContent(
-                    targetState = balanceVisible,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "balance"
-                ) { visible ->
-                    if (uiState.isLoading && !uiState.isInitialized) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = TorActive,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            text = if (visible) "%,d sats".format(uiState.balanceSats) else "●●●●●●",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = TextPrimary
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(SurfaceAlt)
-                        .clickable { balanceVisible = !balanceVisible }
-                        .padding(horizontal = 16.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = if (balanceVisible) "Tap to hide" else "Tap to reveal",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
-                    )
-                }
-            }
+            HomeBalanceCard(
+                uiState = uiState,
+                balanceVisible = balanceVisible,
+                onToggleVisibility = { balanceVisible = !balanceVisible },
+            )
         }
 
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                ActionButton("SEND", Icons.AutoMirrored.Filled.CallMade, Modifier.weight(1f), onSendClick)
-                ActionButton("RECEIVE", Icons.AutoMirrored.Filled.CallReceived, Modifier.weight(1f), onReceiveClick)
-            }
+            HomeActionRow(onSendClick = onSendClick, onReceiveClick = onReceiveClick)
         }
 
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("UTXOs (${uiState.utxos.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextPrimary)
-                Spacer(Modifier.weight(1f))
-                Text(if (uiState.isLoading) "Syncing…" else "Sync",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TorActive,
-                    modifier = Modifier.clickable { walletViewModel.syncWallet() })
-            }
+            HomeUtxoSectionHeader(
+                count = uiState.utxos.size,
+                isLoading = uiState.isLoading,
+                onSync = { walletViewModel.syncWallet() },
+            )
         }
 
         if (uiState.utxos.isEmpty() && !uiState.isLoading) {
             item {
-                Text("No UTXOs yet.",
+                Text(
+                    "No UTXOs yet.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
+                    color = TextSecondary,
+                )
             }
         } else {
-            items(uiState.utxos, key = { "${it.txid}:${it.vout}" }) { utxo -> UtxoCard(utxo.toUtxoItem()) }
+            items(uiState.utxos, key = { "${it.txid}:${it.vout}" }) { utxo ->
+                UtxoCard(utxo.toUtxoItem())
+            }
         }
     }
 }
 
+@Composable
+private fun HomeTorHeader(
+    backendLabel: String,
+    libraryLoadStatus: String,
+    isInitialized: Boolean,
+    torActive: Boolean,
+    error: String?,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("COINSWAP", style = MaterialTheme.typography.titleMedium, color = TorActive)
+            Spacer(Modifier.weight(1f))
+            TorStatusBadge(isActive = torActive)
+        }
+        Text(
+            if (backendLabel.isNotBlank()) backendLabel else "Bitcoin Core RPC • not connected",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextSecondary,
+        )
+        if (!isInitialized && libraryLoadStatus.isNotBlank()) {
+            Text(libraryLoadStatus, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+        }
+        error?.let { message ->
+            Text("⚠  $message", style = MaterialTheme.typography.labelSmall, color = TorInactive)
+        }
+    }
+}
+
+@Composable
+private fun HomeBalanceCard(
+    uiState: WalletUiState,
+    balanceVisible: Boolean,
+    onToggleVisibility: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("TOTAL BALANCE", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+        AnimatedContent(
+            targetState = balanceVisible,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "balance"
+        ) { visible ->
+            if (uiState.isLoading && !uiState.isInitialized) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = TorActive,
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Text(
+                    text = if (visible) "%,d sats".format(uiState.balanceSats) else "●●●●●●",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = TextPrimary
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(SurfaceAlt)
+                .clickable(onClick = onToggleVisibility)
+                .padding(horizontal = 16.dp, vertical = 5.dp)
+        ) {
+            Text(
+                text = if (balanceVisible) "Tap to hide" else "Tap to reveal",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeActionRow(onSendClick: () -> Unit, onReceiveClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        ActionButton("SEND", Icons.AutoMirrored.Filled.CallMade, Modifier.weight(1f), onSendClick)
+        ActionButton("RECEIVE", Icons.AutoMirrored.Filled.CallReceived, Modifier.weight(1f), onReceiveClick)
+    }
+}
+
+@Composable
+private fun HomeUtxoSectionHeader(count: Int, isLoading: Boolean, onSync: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("UTXOs ($count)", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (isLoading) "Syncing…" else "Sync",
+            style = MaterialTheme.typography.labelSmall,
+            color = TorActive,
+            modifier = Modifier.clickable(onClick = onSync),
+        )
+    }
+}
+
 private fun UtxoUiModel.toUtxoItem(): UtxoItem {
+    // Match swap-flow classification: SeedCoin = regular/exposed; else swap/mixed privacy.
     val privacy = when {
-        (confirmations ?: 0) == 0 -> PrivacyLevel.LOW
-        (confirmations ?: 0) < 3  -> PrivacyLevel.MED
-        else                      -> PrivacyLevel.HIGH
+        spendType == null || spendType == "SeedCoin" -> PrivacyLevel.LOW
+        spendType.contains("Swap", ignoreCase = true) -> PrivacyLevel.HIGH
+        else -> PrivacyLevel.MED
     }
     val shortId = if (txid.length > 8) "${txid.take(8)}…:$vout" else "$txid:$vout"
     return UtxoItem(
@@ -228,12 +262,12 @@ private fun ActionButton(
     onClick: () -> Unit
 ) {
     Button(
-        onClick  = onClick,
+        onClick = onClick,
         modifier = modifier.height(52.dp),
-        shape    = RoundedCornerShape(12.dp),
-        colors   = ButtonDefaults.buttonColors(
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
             containerColor = SurfaceAlt,
-            contentColor   = TextPrimary
+            contentColor = TextPrimary
         )
     ) {
         Icon(icon, contentDescription = label, modifier = Modifier.size(18.dp))

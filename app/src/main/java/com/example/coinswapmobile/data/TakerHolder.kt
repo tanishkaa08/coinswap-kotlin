@@ -2,6 +2,7 @@ package com.example.coinswapmobile.data
 
 import org.coinswap.Taker
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * Holds the live UniFFI [Taker] instance after successful init.
@@ -10,8 +11,14 @@ import java.util.concurrent.atomic.AtomicReference
 object TakerHolder {
     private val ref = AtomicReference<Taker?>(null)
 
+    /** Serializes [CoinswapRepository.initTaker] across ViewModels. */
+    val initMutex = Mutex()
+
     fun set(taker: Taker) {
-        ref.set(taker)
+        val previous = ref.getAndSet(taker)
+        if (previous != null && previous !== taker) {
+            runCatching { previous.close() }
+        }
     }
 
     fun get(): Taker? = ref.get()
@@ -20,7 +27,10 @@ object TakerHolder {
         get() ?: error("Taker not initialized. Complete setup and call Taker.init first.")
 
     fun clear() {
-        ref.set(null)
+        val previous = ref.getAndSet(null)
+        if (previous != null) {
+            runCatching { previous.close() }
+        }
     }
 
     val isInitialized: Boolean get() = get() != null

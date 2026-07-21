@@ -11,7 +11,13 @@ import java.io.File
 object FfiEnv {
 
     fun takerDataDir(context: Context): String {
-        val dir = File(context.filesDir, "taker").apply { mkdirs() }
+        val dir = File(context.filesDir, "taker")
+        if (!dir.exists() && !dir.mkdirs()) {
+            error("Failed to create taker data directory: ${dir.absolutePath}")
+        }
+        if (!dir.isDirectory) {
+            error("Taker data path exists but is not a directory: ${dir.absolutePath}")
+        }
         ensureHome(dir.absolutePath)
         return dir.absolutePath
     }

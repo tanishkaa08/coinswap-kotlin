@@ -21,6 +21,15 @@ NET_PORTS=(6104 6110 6120 6130 6140)
 RPC_PORTS=(6103 6111 6121 6131 6141)
 WALLETS=("coinswap-maker" "maker-2" "maker-3" "maker-4" "maker-5")
 
+if ! [[ "$MAKER_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: MAKER_COUNT must be a positive integer (got: $MAKER_COUNT)" >&2
+  exit 1
+fi
+if (( MAKER_COUNT > ${#NET_PORTS[@]} || MAKER_COUNT > ${#RPC_PORTS[@]} || MAKER_COUNT > ${#WALLETS[@]} )); then
+  echo "ERROR: MAKER_COUNT=$MAKER_COUNT exceeds configured makers (${#WALLETS[@]})." >&2
+  exit 1
+fi
+
 maker_container() {
   local idx="$1"
   if [[ "$idx" -eq 1 ]]; then echo "coinswap-makerd"; else echo "coinswap-makerd-${idx}"; fi

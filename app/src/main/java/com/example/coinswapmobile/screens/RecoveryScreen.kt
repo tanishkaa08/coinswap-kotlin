@@ -41,7 +41,7 @@ object SwapRecovery {
     private const val SWAP_FILE = "swap.json"
 
     fun readSwapState(context: Context): SwapRecoveryInfo? {
-        val file = File(context.filesDir, SWAP_FILE)
+        val file = File(FfiEnv.takerDataDir(context), SWAP_FILE)
         if (!file.exists()) return null
         return try {
             val json = JSONObject(file.readText())

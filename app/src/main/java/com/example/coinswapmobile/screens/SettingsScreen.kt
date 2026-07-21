@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.SectionLabel
@@ -96,11 +97,25 @@ fun SettingsScreen(
             OutlinedTextField(rpcHost, { rpcHost = it }, label = { Text("RPC host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(rpcPort, { rpcPort = it.filter(Char::isDigit) }, label = { Text("RPC port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedTextField(rpcUser, { rpcUser = it }, label = { Text("RPC username") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            OutlinedTextField(rpcPass, { rpcPass = it }, label = { Text("RPC password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(
+                rpcPass,
+                { rpcPass = it },
+                label = { Text("RPC password") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
             OutlinedTextField(zmqHost, { zmqHost = it }, label = { Text("ZMQ host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
             OutlinedTextField(zmqPort, { zmqPort = it.filter(Char::isDigit) }, label = { Text("ZMQ port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedTextField(walletName, { walletName = it }, label = { Text("Wallet name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            OutlinedTextField(walletPassword, { walletPassword = it }, label = { Text("Wallet password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(
+                walletPassword,
+                { walletPassword = it },
+                label = { Text("Wallet password") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
             Button(
                 onClick = {
                     val port = rpcPort.toIntOrNull() ?: return@Button
@@ -214,7 +229,7 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, TorInactive)
             ) {
-                Text("Clear local taker + re-init", color = TorInactive)
+                Text("Clear local taker", color = TorInactive)
             }
         }
 

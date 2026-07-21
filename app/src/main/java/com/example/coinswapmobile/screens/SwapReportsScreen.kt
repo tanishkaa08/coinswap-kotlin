@@ -61,7 +61,7 @@ fun SwapReportsScreen(
     val failedCount   = reports.count { it.status == ReportStatus.FAILED }
     val totalVolume   = reports.filter { it.status == ReportStatus.COMPLETED }.sumOf { it.amountSats }
     val totalFees     = reports.filter { it.status == ReportStatus.COMPLETED }.sumOf { it.totalFeeSats }
-    val avgHops       = reports.map { it.hops }.average()
+    val avgHops       = if (reports.isEmpty()) 0.0 else reports.map { it.hops }.average()
 
     Column(
         modifier = Modifier
