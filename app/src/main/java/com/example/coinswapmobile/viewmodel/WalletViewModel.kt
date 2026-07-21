@@ -93,7 +93,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                                 isLoading = false,
                                 isInitialized = true,
                                 error = if (!tor.reachable) {
-                                    "Wallet connected. Tor SOCKS not reachable; markets/swaps need Orbot."
+                                    "Tor unreachable."
                                 } else {
                                     null
                                 },

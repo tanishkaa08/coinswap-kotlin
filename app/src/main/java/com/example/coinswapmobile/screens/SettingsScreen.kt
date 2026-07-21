@@ -188,7 +188,6 @@ fun SettingsScreen(
             CapabilityRow("Recovery", caps.recovery)
             if (caps.missingApis.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
-                Text("Not in UniFFI (UI stubs / desktop-only):", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                 caps.missingApis.forEach { api ->
                     Text("• $api", style = MaterialTheme.typography.labelSmall, color = AccentAmber)
                 }
@@ -197,7 +196,6 @@ fun SettingsScreen(
 
         SettingsCard {
             SectionLabel("SWAP RECOVERY")
-            Text("Call UniFFI recover_active_swap for incomplete sessions.", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
             Button(
                 onClick = onOpenRecovery,
                 modifier = Modifier.fillMaxWidth().height(44.dp),
@@ -210,11 +208,6 @@ fun SettingsScreen(
 
         SettingsCard {
             SectionLabel("WALLET DATA")
-            Text(
-                "Clearing local session does not delete Bitcoin Core wallet data. Re-init will reload/create via FFI.",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-            )
             OutlinedButton(
                 onClick = { showResetConfirm = true },
                 modifier = Modifier.fillMaxWidth().height(44.dp),
@@ -258,17 +251,14 @@ fun SettingsScreen(
             containerColor = Surface,
             title = { Text("Clear local taker?", color = TextPrimary) },
             text = {
-                Text(
-                    "Drops the in-memory UniFFI Taker for \"$walletName\". Next reconnect calls Taker.init again.",
-                    color = TextSecondary,
-                )
+                Text("Clear local taker for \"$walletName\"?", color = TextSecondary)
             },
             confirmButton = {
                 Button(
                     onClick = {
                         showResetConfirm = false
                         TakerHolder.clear()
-                        statusMessage = "Local Taker cleared. Tap Save & reconnect."
+                        statusMessage = "Cleared."
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = TorInactive)
                 ) { Text("Clear", color = androidx.compose.ui.graphics.Color.White) }

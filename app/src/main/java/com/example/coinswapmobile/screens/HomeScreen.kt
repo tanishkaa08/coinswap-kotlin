@@ -196,7 +196,7 @@ fun HomeScreen(
 
         if (uiState.utxos.isEmpty() && !uiState.isLoading) {
             item {
-                Text("No UTXOs yet. Fund a receive address and tap Sync.",
+                Text("No UTXOs yet.",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary)
             }

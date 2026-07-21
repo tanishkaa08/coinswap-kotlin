@@ -14,8 +14,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.OrbotHelper
 import com.example.coinswapmobile.components.OrbotInstallDialog
@@ -33,6 +36,23 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     var selectedMaker by remember { mutableStateOf<SwapMaker?>(null) }
     var showOrbotDialog by remember { mutableStateOf(false) }
     val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // Auto-sync makers while this screen is visible; stop when it isn't.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> marketsViewModel.startAutoSync()
+                Lifecycle.Event.ON_PAUSE -> marketsViewModel.stopAutoSync()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            marketsViewModel.stopAutoSync()
+        }
+    }
 
     OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
@@ -157,11 +177,6 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         }
 
         item { Spacer(Modifier.height(8.dp)) }
-        item {
-            Text("Tap any maker to see min/max swap, onion address and status.",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary.copy(alpha = 0.6f))
-        }
     }
 }
 

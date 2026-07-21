@@ -32,15 +32,17 @@ fun SectionLabel(text: String) {
 @Composable
 fun LabeledSwitch(
     label: String,
-    subtitle: String,
+    subtitle: String = "",
     checked: Boolean,
     onChange: (Boolean) -> Unit
 ) {
     Row(modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(label,    style = MaterialTheme.typography.bodyMedium,  color = TextPrimary)
-            Text(subtitle, style = MaterialTheme.typography.labelSmall,  color = TextSecondary)
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+            }
         }
         Switch(
             checked = checked, onCheckedChange = onChange,

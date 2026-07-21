@@ -27,16 +27,13 @@ import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.WalletViewModel
 
 private fun networkHint(address: String?, rpcLabel: String): String {
-    val fromAddr = when {
-        address?.startsWith("tb1") == true -> "Testnet (tb1…)"
-        address?.startsWith("bc1") == true -> "Mainnet (bc1…)"
-        else -> null
-    }
-    if (fromAddr != null) return fromAddr
     return when {
-        rpcLabel.contains("38332") || rpcLabel.contains("test", ignoreCase = true) ->
-            "Signet / test network; expect tb1… if applicable"
-        else -> "Address network must match your bitcoind chain"
+        address?.startsWith("bcrt1") == true -> "Regtest"
+        address?.startsWith("tb1") == true -> "Testnet / signet"
+        address?.startsWith("bc1") == true -> "Mainnet"
+        rpcLabel.contains("18442") -> "Regtest"
+        rpcLabel.contains("38332") -> "Signet"
+        else -> rpcLabel.ifBlank { "Bitcoin" }
     }
 }
 
@@ -100,10 +97,6 @@ fun ReceiveScreen(
 
                 address == null -> {
                     Spacer(Modifier.height(24.dp))
-                    Text("Tap Generate to create a receive address via UniFFI Taker.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center)
                 }
 
                 else -> {
@@ -152,14 +145,6 @@ fun ReceiveScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = TorActive)
                     }
-
-                    Text(
-                        "Fund this address from a testnet faucet, then tap Sync on Home.",
-                        style     = MaterialTheme.typography.labelSmall,
-                        color     = TextSecondary,
-                        textAlign = TextAlign.Center,
-                        modifier  = Modifier.padding(horizontal = 8.dp)
-                    )
                 }
             }
 

@@ -52,10 +52,6 @@ fun WalletHistoryScreen(
             Text("Transaction History",
                 style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary)
-            Spacer(Modifier.height(4.dp))
-            Text("Wallet activity via UniFFI Taker (Bitcoin Core RPC)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary)
         }
 
         vmState.errorMessage?.let { msg ->
@@ -76,7 +72,7 @@ fun WalletHistoryScreen(
             if (vmState.swaps.isNotEmpty()) {
                 item {
                     Spacer(Modifier.height(6.dp))
-                    Text("COINSWAPS",
+                    Text("SWAPS",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary)
                 }
@@ -94,7 +90,7 @@ fun WalletHistoryScreen(
             }
             if (vmState.transactions.isEmpty() && !vmState.isLoading) {
                 item {
-                    Text("No transactions yet. Fund a receive address and tap Sync on Home.",
+                    Text("No transactions yet.",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary)
                 }

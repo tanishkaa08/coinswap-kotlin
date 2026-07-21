@@ -196,9 +196,6 @@ fun SwapScreen(
                 Text("Coinswap",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary)
-                Text("Route Bitcoin privately through multiple makers.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary)
             }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(
@@ -295,9 +292,6 @@ fun SwapScreen(
 
         SectionCard {
             Text("MAKER COUNT",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Text("Number of makers your coins route through",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
             Spacer(Modifier.height(8.dp))
@@ -414,7 +408,6 @@ fun SwapScreen(
         ) {
             LabeledSwitch(
                 label    = "Auto-select best makers",
-                subtitle = "Picks lowest fee makers with valid fidelity bonds",
                 checked  = autoSelectMakers,
                 onChange = { autoSelectMakers = it }
             )
@@ -442,9 +435,6 @@ fun SwapScreen(
             }
 
             Text("TRANSACTION SPLITS (tx_count)",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Text("Splits each funding into multiple txs (Taproot). Leave at 1 for Legacy.",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
             OutlinedTextField(
@@ -489,7 +479,6 @@ fun SwapScreen(
         SectionCard {
             LabeledSwitch(
                 label    = "Choose specific coins",
-                subtitle = "Off: automatic. On: pick which coins to spend.",
                 checked  = useManualUtxos,
                 onChange = {
                     useManualUtxos = it
@@ -500,7 +489,7 @@ fun SwapScreen(
             if (!useManualUtxos) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Wallet selects coins from one pool. Available: ${formatSats(autoBestPool)} sats.",
+                    "Available: ${formatSats(autoBestPool)} sats",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                 )
@@ -530,7 +519,7 @@ fun SwapScreen(
                         )
                     }
                     Text(
-                        "Regular and swap coins cannot be mixed in one swap.",
+                        "Cannot mix regular and swap coins.",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                     )
@@ -575,38 +564,10 @@ fun SwapScreen(
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Forcing ${manualSelected.size} coin(s) • ${formatSats(manualTotal)} sats",
+                    "${manualSelected.size} coin(s) • ${formatSats(manualTotal)} sats",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (manualTotal >= amountSatsLong && amountSatsLong > 0) TorActive else TextPrimary,
                 )
-            }
-        }
-
-        if (amountSatsLong > 0) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(AccentPurple.copy(alpha = 0.12f))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text("🔒", style = MaterialTheme.typography.titleMedium)
-                    Column {
-                        Text("Encryption Layer Active",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = AccentPurple)
-                        Text(
-                            "Your coins will travel through $makerCount independent makers. " +
-                                "No single party can link sender to receiver.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
-                        )
-                    }
-                }
             }
         }
 
@@ -936,10 +897,6 @@ private fun SwapConfirmDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Review the details before proceeding.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary)
-                Spacer(Modifier.height(4.dp))
                 ConfirmRow("Amount to swap",    "${formatSats(amountSats)} sats")
                 ConfirmRow("Makers",            "$makerCount")
                 if (txCount > 1) ConfirmRow("Transaction splits", "$txCount")

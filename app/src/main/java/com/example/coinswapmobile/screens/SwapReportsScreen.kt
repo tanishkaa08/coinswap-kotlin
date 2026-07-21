@@ -1,18 +1,24 @@
 package com.example.coinswapmobile.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.viewmodel.SwapReportsViewModel
@@ -80,9 +86,6 @@ fun SwapReportsScreen(
                     Text("Swap History",
                         style = MaterialTheme.typography.titleMedium,
                         color = TextPrimary)
-                    Text("Completed and failed coinswap history",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary)
                 }
             }
         }
@@ -165,16 +168,19 @@ private fun SwapReportRow(report: SwapReport) {
     val borderColor = if (isFailed) AccentAmber.copy(0.4f) else Divider
     val bgColor     = if (isFailed) AccentAmber.copy(0.05f) else Surface
 
+    var expanded by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(bgColor)
             .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .clickable { expanded = !expanded }
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Top row: ID + time + duration + badges
+        // Top row: ID + expand toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -184,8 +190,12 @@ private fun SwapReportRow(report: SwapReport) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextPrimary,
                 modifier = Modifier.weight(1f))
-            Icon(Icons.AutoMirrored.Filled.OpenInNew, null,
-                tint = TextSecondary, modifier = Modifier.size(14.dp))
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                contentDescription = if (expanded) "Hide details" else "Show details",
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp),
+            )
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -210,16 +220,29 @@ private fun SwapReportRow(report: SwapReport) {
                 color = AccentAmber)
         }
 
-        // Data row: Amount | Makers | Fee | Output
-        HorizontalDivider(color = Divider)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            DataCol("AMOUNT",  "%,d".format(report.amountSats))
-            DataCol("MAKERS",  "${report.makerCount}")
-            DataCol("TOTAL FEE","%,d".format(report.totalFeeSats))
-            DataCol("OUTPUT",  if (isFailed) "0" else "%,d".format(report.outputSats), TorActive)
+        // Details revealed on tap
+        AnimatedVisibility(visible = expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HorizontalDivider(color = Divider)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    DataCol("AMOUNT",  "%,d".format(report.amountSats))
+                    DataCol("MAKERS",  "${report.makerCount}")
+                    DataCol("TOTAL FEE","%,d".format(report.totalFeeSats))
+                    DataCol("OUTPUT",  if (isFailed) "0" else "%,d".format(report.outputSats), TorActive)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    DataCol("HOPS",     "${report.hops}")
+                    DataCol("PROTOCOL", report.protocol)
+                    DataCol("DURATION", report.duration)
+                }
+                DataCol("SWAP ID", report.id)
+            }
         }
     }
 }
