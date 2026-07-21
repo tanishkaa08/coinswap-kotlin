@@ -71,6 +71,12 @@ class CoinswapRepository(
             callFfi("Taker.init") {
                 FfiEnv.ensureHome(appDataDir)
                 val cfg = session.config
+                require(cfg.torControlPort in 1..65535) {
+                    "Tor control port must be 1..65535 (got ${cfg.torControlPort})"
+                }
+                // Drop any prior Taker before reconnecting so a failed init cannot
+                // leave the old backend live against a newly saved session config.
+                TakerHolder.clear()
                 setupLogging(appDataDir)
                 val taker = Taker.init(
                     dataDir = appDataDir,
@@ -88,7 +94,10 @@ class CoinswapRepository(
                     // Only publish after sync succeeds so callers never see a half-init Taker.
                     TakerHolder.set(taker)
                     state
-                } catch (e: Throwable) {
+                } catch (e: Exception) {
+                    runCatching { taker.close() }
+                    throw e
+                } catch (e: Error) {
                     runCatching { taker.close() }
                     throw e
                 }
@@ -469,7 +478,8 @@ class CoinswapRepository(
     private suspend fun <T> callFfi(operation: String, block: () -> T): Result<T> =
         withContext(Dispatchers.IO) {
             try {
-                Result.success(block())
+                // Lease covers the whole FFI call so clear()/set() cannot close mid-op.
+                Result.success(TakerHolder.withLeased(block))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {

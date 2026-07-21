@@ -45,20 +45,20 @@ object TorManager {
         timeoutMs: Int,
     ): PortStatus = withContext(Dispatchers.IO) {
         runCatching {
+            // Keep one socket scope for write + read — closing DataOutputStream would
+            // close the socket before the SOCKS5 reply can be read.
             Socket().use { socket ->
                 socket.soTimeout = timeoutMs
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
-                DataOutputStream(socket.getOutputStream()).use { out ->
-                    // SOCKS5 greeting: VER=5, NMETHODS=1, METHOD=0 (no auth)
-                    out.write(byteArrayOf(0x05, 0x01, 0x00))
-                    out.flush()
-                }
-                DataInputStream(socket.getInputStream()).use { inp ->
-                    val ver = inp.read()
-                    val method = inp.read()
-                    if (ver != 0x05 || method == 0xFF || method < 0) {
-                        error("SOCKS5 handshake rejected (ver=$ver method=$method)")
-                    }
+                val out = DataOutputStream(socket.getOutputStream())
+                val inp = DataInputStream(socket.getInputStream())
+                // SOCKS5 greeting: VER=5, NMETHODS=1, METHOD=0 (no auth)
+                out.write(byteArrayOf(0x05, 0x01, 0x00))
+                out.flush()
+                val ver = inp.read()
+                val method = inp.read()
+                if (ver != 0x05 || method == 0xFF || method < 0) {
+                    error("SOCKS5 handshake rejected (ver=$ver method=$method)")
                 }
             }
             PortStatus(true, host, port, "Tor SOCKS reachable at $host:$port")
