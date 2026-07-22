@@ -75,7 +75,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         connectJob?.cancel()
         connectJob = viewModelScope.launch {
             val cfg = session.config
-            val tor = TorManager.checkSocks(cfg.torSocksHost, cfg.torSocksPort)
+            val tor = TorManager.checkSocks()
             _uiState.update {
                 it.copy(
                     isLoading = true,
@@ -115,7 +115,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshTorStatus() {
         viewModelScope.launch {
-            val tor = TorManager.checkSocks(session.socksHost, session.socksPort)
+            val tor = TorManager.checkSocks()
             _uiState.update {
                 it.copy(torReachable = tor.reachable, torStatusMessage = tor.message)
             }

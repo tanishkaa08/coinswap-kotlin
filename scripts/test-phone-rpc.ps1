@@ -1,12 +1,25 @@
 # Verify phone -> PC bitcoind RPC via adb reverse (reliable JSON, no quoting issues).
 param(
-    [string]$Device = "RZCW40SG3NN"
+    [string]$Device = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-$adbArgs = @()
-if ($Device) { $adbArgs += @("-s", $Device) }
+function Resolve-AdbDevice {
+    param([string]$Preferred)
+    if ($Preferred) { return $Preferred }
+    $lines = & adb devices 2>$null | Select-Object -Skip 1 | Where-Object { $_ -match "\tdevice$" }
+    if (-not $lines -or $lines.Count -eq 0) {
+        throw "No adb device connected. Pass -Device <serial>."
+    }
+    if ($lines.Count -gt 1) {
+        throw "Multiple adb devices connected. Pass -Device <serial>."
+    }
+    return (($lines | Select-Object -First 1) -split "\s+")[0]
+}
+
+$Device = Resolve-AdbDevice -Preferred $Device
+$adbArgs = @("-s", $Device)
 
 $jsonPath = Join-Path $PSScriptRoot "rpc-test.json"
 $remotePath = "/data/local/tmp/rpc-test.json"

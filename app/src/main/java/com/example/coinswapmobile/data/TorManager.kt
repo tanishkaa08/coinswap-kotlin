@@ -11,7 +11,7 @@ import java.net.Socket
  * Connectivity probes for Tor SOCKS and control ports.
  *
  * UniFFI [org.coinswap.Taker.init] hardcodes SOCKS `127.0.0.1:9050` on the Rust side;
- * preflight always targets that endpoint so a green check matches what swaps actually use.
+ * [checkSocks] always probes that fixed endpoint.
  */
 object TorManager {
 
@@ -22,12 +22,8 @@ object TorManager {
         val message: String,
     )
 
-    /** Always probes the UniFFI SOCKS endpoint (ignores alternate configured host/port). */
-    suspend fun checkSocks(
-        @Suppress("UNUSED_PARAMETER") host: String = TakerAppConfig.DEFAULT_SOCKS_HOST,
-        @Suppress("UNUSED_PARAMETER") port: Int = TakerAppConfig.DEFAULT_SOCKS_PORT,
-        timeoutMs: Int = 5_000,
-    ): PortStatus = checkSocksHandshake(
+    /** Probes the UniFFI SOCKS endpoint (`127.0.0.1:9050`). */
+    suspend fun checkSocks(timeoutMs: Int = 5_000): PortStatus = checkSocksHandshake(
         host = TakerAppConfig.DEFAULT_SOCKS_HOST,
         port = TakerAppConfig.DEFAULT_SOCKS_PORT,
         timeoutMs = timeoutMs,

@@ -654,7 +654,6 @@ fun SwapScreen(
                     amountSats      = amountSatsLong,
                     makerCount      = makerCount,
                     txCount         = txCount,
-                    feeRateSatPerVb = networkFee.satPerVbyte,
                     manual          = useManualUtxos,
                     selectedUtxos   = if (useManualUtxos) manualSelected else emptyList(),
                     makerIds        = if (customOnion.isNotBlank()) {

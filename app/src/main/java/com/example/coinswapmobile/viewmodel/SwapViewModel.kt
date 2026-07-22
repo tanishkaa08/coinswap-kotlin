@@ -53,7 +53,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch {
-            val tor = TorManager.checkSocks(session.socksHost, session.socksPort)
+            val tor = TorManager.checkSocks()
             _state.update {
                 it.copy(
                     isLoading = true,
@@ -122,7 +122,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     fun beginSwap(
         amountSats: Long,
         makerCount: Int,
-        feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
         txCount: Int = 1,
         manual: Boolean = false,
@@ -130,7 +129,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         protocol: String = session.config.protocol,
     ) {
         viewModelScope.launch {
-            val tor = TorManager.checkSocks(session.socksHost, session.socksPort)
+            val tor = TorManager.checkSocks()
             if (!tor.reachable) {
                 _state.update {
                     it.copy(swapError = "Tor SOCKS required for swaps: ${tor.message}")
@@ -184,7 +183,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             swapRepo.prepareCoinswap(
                 amountSats = amountSats,
                 makerCount = makerCount,
-                feeRateSatPerVb = feeRateSatPerVb,
                 selectedUtxos = selectedUtxos,
                 txCount = txCount,
                 makerIds = makerIds,

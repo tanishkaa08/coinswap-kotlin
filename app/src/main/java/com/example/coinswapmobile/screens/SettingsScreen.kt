@@ -158,10 +158,7 @@ fun SettingsScreen(
             Button(
                 onClick = {
                     scope.launch {
-                        val socks = TorManager.checkSocks(
-                            socksHost.trim().ifBlank { TakerAppConfig.DEFAULT_SOCKS_HOST },
-                            socksPort.toIntOrNull() ?: TakerAppConfig.DEFAULT_SOCKS_PORT,
-                        )
+                        val socks = TorManager.checkSocks()
                         val ctrl = TorManager.checkControl(
                             socksHost.trim().ifBlank { TakerAppConfig.DEFAULT_SOCKS_HOST },
                             torControl.toIntOrNull() ?: TakerAppConfig.DEFAULT_TOR_CONTROL,

@@ -223,14 +223,12 @@ class CoinswapRepository(
     suspend fun prepareCoinswap(
         amountSats: Long,
         makerCount: Int,
-        feeRateSatPerVb: Long,
         selectedUtxos: List<UtxoUiModel>,
         makerIds: List<String>,
         txCount: Int = 1,
         protocol: String = "Legacy",
     ): Result<PreparedSwap> = callFfi("prepareCoinswap") {
-        @Suppress("UNUSED_VARIABLE")
-        val ignoredFeeHint = feeRateSatPerVb
+        // SwapParams has no fee-rate field in UniFFI; network fee is UI estimate only.
         val outpoints = selectedUtxos.takeIf { it.isNotEmpty() }?.map { u ->
             OutPoint(txid = Txid(value = u.txid), vout = u.vout.toUInt())
         }
@@ -289,9 +287,9 @@ class CoinswapRepository(
                 val id = json.optString("swap_id", json.optString("swapId", name))
                 val failed = status.contains("fail", true) ||
                     status.contains("recover", true) ||
-                    status.contains("incomplete", true) ||
-                    status.contains("pending", true)
-                if (failed || id.isNotBlank()) {
+                    status.contains("incomplete", true)
+                // Only surface genuine recovery cases — not active "pending" swaps.
+                if (failed) {
                     found += RecoverableSwap(
                         swapId = id.ifBlank { "active" },
                         phase = status.ifBlank { "unknown" },

@@ -56,7 +56,6 @@ class SwapRepository(
     suspend fun prepareCoinswap(
         amountSats: Long,
         makerCount: Int,
-        feeRateSatPerVb: Int,
         selectedUtxos: List<SwapUtxo>,
         txCount: Int = 1,
         makerIds: List<String> = emptyList(),
@@ -93,7 +92,6 @@ class SwapRepository(
         coinswap.prepareCoinswap(
             amountSats = amountSats,
             makerCount = makerCount,
-            feeRateSatPerVb = feeRateSatPerVb.toLong(),
             selectedUtxos = enriched,
             txCount = txCount,
             makerIds = makerIds,

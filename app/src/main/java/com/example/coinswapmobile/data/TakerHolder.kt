@@ -13,14 +13,15 @@ object TakerHolder {
     private val lock = Any()
     private var current: Taker? = null
     private var activeLeases = 0
-    private var pendingClose: Taker? = null
+    /** Retired Takers waiting for [activeLeases] to hit zero. Never closed early. */
+    private val pendingCloses = mutableListOf<Taker>()
 
     /** Serializes [CoinswapRepository.initTaker] across ViewModels. */
     val initMutex = Mutex()
 
     /**
      * Hold a lease for the duration of [block]. [require] is only safe inside this.
-     * When the last lease ends, any retired Taker from [set]/[clear] is closed.
+     * When the last lease ends, every retired Taker is closed.
      */
     fun <R> withLeased(block: () -> R): R {
         synchronized(lock) { activeLeases++ }
@@ -30,14 +31,14 @@ object TakerHolder {
             val toClose = synchronized(lock) {
                 activeLeases--
                 if (activeLeases == 0) {
-                    val retired = pendingClose
-                    pendingClose = null
+                    val retired = pendingCloses.toList()
+                    pendingCloses.clear()
                     retired
                 } else {
-                    null
+                    emptyList()
                 }
             }
-            if (toClose != null) runCatching { toClose.close() }
+            toClose.forEach { runCatching { it.close() } }
         }
     }
 
@@ -71,11 +72,9 @@ object TakerHolder {
             if (activeLeases == 0) {
                 true
             } else {
-                // Keep only the latest retired instance; close any earlier one immediately.
-                val older = pendingClose
-                pendingClose = taker
-                if (older != null && older !== taker) {
-                    runCatching { older.close() }
+                // Never close while any lease is active — queue until drain.
+                if (pendingCloses.none { it === taker }) {
+                    pendingCloses.add(taker)
                 }
                 false
             }

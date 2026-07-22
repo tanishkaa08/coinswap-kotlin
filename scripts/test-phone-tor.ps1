@@ -1,8 +1,23 @@
 # Test Tor control from phone using curl (nc often missing on Samsung).
-param([string]$Device = "RZCW40SG3NN")
+param([string]$Device = "")
 
-$adbArgs = @()
-if ($Device) { $adbArgs += @("-s", $Device) }
+$ErrorActionPreference = "Stop"
+
+function Resolve-AdbDevice {
+    param([string]$Preferred)
+    if ($Preferred) { return $Preferred }
+    $lines = & adb devices 2>$null | Select-Object -Skip 1 | Where-Object { $_ -match "\tdevice$" }
+    if (-not $lines -or $lines.Count -eq 0) {
+        throw "No adb device connected. Pass -Device <serial>."
+    }
+    if ($lines.Count -gt 1) {
+        throw "Multiple adb devices connected. Pass -Device <serial>."
+    }
+    return (($lines | Select-Object -First 1) -split "\s+")[0]
+}
+
+$Device = Resolve-AdbDevice -Preferred $Device
+$adbArgs = @("-s", $Device)
 
 Write-Host "Testing TCP to 127.0.0.1:9051 on phone (via adb reverse)..."
 $out = & adb @adbArgs shell curl -sS --connect-timeout 5 -m 5 telnet://127.0.0.1:9051 2>&1
