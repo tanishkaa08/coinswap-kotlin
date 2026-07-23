@@ -93,8 +93,6 @@ fun LoginScreen(onConnected: () -> Unit) {
     }
     var zmqPort by remember { mutableStateOf(initial.zmqPort.toString()) }
     var torControl by remember { mutableStateOf(initial.torControlPort.toString()) }
-    var socksHost by remember { mutableStateOf(initial.torSocksHost) }
-    var socksPort by remember { mutableStateOf(initial.torSocksPort.toString()) }
     var torAuth by remember { mutableStateOf(initial.torAuthPassword) }
     var walletName by remember { mutableStateOf(initial.walletName) }
     var walletPassword by remember { mutableStateOf(initial.walletPassword) }
@@ -113,8 +111,7 @@ fun LoginScreen(onConnected: () -> Unit) {
         val port = rpcPort.toIntOrNull()
         val zPort = zmqPort.toIntOrNull()
         val cPort = torControl.toIntOrNull()
-        val sPort = socksPort.toIntOrNull()
-        if (rpcHost.isBlank() || port == null || zPort == null || cPort == null || sPort == null) {
+        if (rpcHost.isBlank() || port == null || zPort == null || cPort == null) {
             error = "Fill RPC, ZMQ, and Tor ports with valid numbers"
             return
         }
@@ -132,11 +129,13 @@ fun LoginScreen(onConnected: () -> Unit) {
             zmqHost = zmqHost.trim(),
             zmqPort = zPort,
             torControlPort = cPort,
-            torSocksHost = socksHost.trim(),
-            torSocksPort = sPort,
+            // UniFFI hardcodes SOCKS 127.0.0.1:9050 — always persist that.
+            torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
+            torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
             torAuthPassword = torAuth,
             walletName = walletName.trim(),
             walletPassword = walletPassword,
+            protocol = session.config.protocol,
         )
         // Persist settings but stay logged out until Taker.init succeeds.
         session.saveConfig(cfg, markLoggedIn = false)
@@ -204,10 +203,13 @@ fun LoginScreen(onConnected: () -> Unit) {
                 Field("ZMQ port", zmqPort, { zmqPort = it.filter(Char::isDigit) }, KeyboardType.Number)
 
                 Text("Tor", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Field("SOCKS host", socksHost, { socksHost = it }, KeyboardType.Uri)
-                Field("SOCKS port", socksPort, { socksPort = it.filter(Char::isDigit) }, KeyboardType.Number)
+                Text(
+                    "SOCKS ${TakerAppConfig.DEFAULT_SOCKS_HOST}:${TakerAppConfig.DEFAULT_SOCKS_PORT}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                )
                 Field("Control port", torControl, { torControl = it.filter(Char::isDigit) }, KeyboardType.Number)
-                Field("Tor auth password (optional)", torAuth, { torAuth = it })
+                PasswordField("Tor auth password (optional)", torAuth, { torAuth = it }, showPwd) { showPwd = !showPwd }
 
                 Text("Wallet", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
                 Field("Wallet name", walletName, { walletName = it })

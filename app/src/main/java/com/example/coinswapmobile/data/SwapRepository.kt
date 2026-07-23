@@ -32,6 +32,7 @@ class MarketRepository(
         fidelityBondBtc = fidelityBondBtc,
         onionAddress = onionAddress,
         online = online,
+        baseFee = baseFee,
     )
 }
 

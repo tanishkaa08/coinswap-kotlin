@@ -90,7 +90,9 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                                 selected = true,
                             )
                         }
-                    val makers = coinswapRepo.listMakers().getOrNull().orEmpty().map { m ->
+                    val makersResult = coinswapRepo.listMakers()
+                    val makersError = makersResult.exceptionOrNull()?.message
+                    val makers = makersResult.getOrNull().orEmpty().map { m ->
                         SwapMaker(
                             id = m.id,
                             feeRatePct = m.feeRatePct,
@@ -100,6 +102,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                             fidelityBondBtc = m.fidelityBondBtc,
                             onionAddress = m.onionAddress,
                             online = m.online,
+                            baseFee = m.baseFee,
                         )
                     }
                     _state.update {
@@ -108,6 +111,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                             walletSats = state.balanceSats,
                             utxos = utxos,
                             makers = makers,
+                            errorMessage = makersError,
                         )
                     }
                 }
@@ -163,7 +167,14 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             if (manual) {
-                val freshUtxos = coinswapRepo.getBalance().getOrNull()?.utxos.orEmpty()
+                val balance = coinswapRepo.getBalance()
+                if (balance.isFailure) {
+                    _state.update {
+                        it.copy(isSwapping = false, swapError = balance.exceptionOrNull()?.message)
+                    }
+                    return@launch
+                }
+                val freshUtxos = balance.getOrNull()?.utxos.orEmpty()
                 val invalid = selectedUtxos.filter { sel ->
                     freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
                 }
@@ -178,7 +189,10 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _state.update { it.copy(swapPhase = "Syncing offerbook…") }
-            coinswapRepo.syncOfferbook()
+            coinswapRepo.syncOfferbook().onFailure { e ->
+                _state.update { it.copy(isSwapping = false, swapError = e.message, swapPhase = null) }
+                return@launch
+            }
             _state.update { it.copy(swapPhase = "Preparing…") }
             swapRepo.prepareCoinswap(
                 amountSats = amountSats,

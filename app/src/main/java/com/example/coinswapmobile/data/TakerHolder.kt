@@ -1,13 +1,17 @@
 package com.example.coinswapmobile.data
 
 import org.coinswap.Taker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Holds the live UniFFI [Taker] after successful init.
  *
  * Callers that touch the native object must run inside [withLeased] so
  * [set]/[clear] defer `close()` until in-flight work drains.
+ * [ffiMutex] serializes native calls so concurrent ViewModels do not
+ * interleave FFI on the same Taker.
  */
 object TakerHolder {
     private val lock = Any()
@@ -18,6 +22,9 @@ object TakerHolder {
 
     /** Serializes [CoinswapRepository.initTaker] across ViewModels. */
     val initMutex = Mutex()
+
+    /** Serializes all UniFFI operations on the live Taker. */
+    val ffiMutex = Mutex()
 
     /**
      * Hold a lease for the duration of [block]. [require] is only safe inside this.
@@ -38,7 +45,7 @@ object TakerHolder {
                     emptyList()
                 }
             }
-            toClose.forEach { runCatching { it.close() } }
+            toClose.forEach { closeQuietly(it) }
         }
     }
 
@@ -72,13 +79,23 @@ object TakerHolder {
             if (activeLeases == 0) {
                 true
             } else {
-                // Never close while any lease is active — queue until drain.
                 if (pendingCloses.none { it === taker }) {
                     pendingCloses.add(taker)
                 }
                 false
             }
         }
-        if (closeNow) runCatching { taker.close() }
+        if (closeNow) closeQuietly(taker)
+    }
+
+    /** Close without absorbing coroutine cancellation. */
+    fun closeQuietly(taker: Taker) {
+        try {
+            taker.close()
+        } catch (_: CancellationException) {
+            throw CancellationException("Taker.close cancelled")
+        } catch (_: Exception) {
+            // Best-effort dispose of UniFFI handle.
+        }
     }
 }

@@ -73,8 +73,6 @@ fun SettingsScreen(
     var zmqHost by remember { mutableStateOf(cfg.zmqHost) }
     var zmqPort by remember { mutableStateOf(cfg.zmqPort.toString()) }
     var torControl by remember { mutableStateOf(cfg.torControlPort.toString()) }
-    var socksHost by remember { mutableStateOf(cfg.torSocksHost) }
-    var socksPort by remember { mutableStateOf(cfg.torSocksPort.toString()) }
     var torAuth by remember { mutableStateOf(cfg.torAuthPassword) }
     var walletName by remember { mutableStateOf(cfg.walletName) }
     var walletPassword by remember { mutableStateOf(cfg.walletPassword) }
@@ -121,7 +119,6 @@ fun SettingsScreen(
                     val port = rpcPort.toIntOrNull() ?: return@Button
                     val zPort = zmqPort.toIntOrNull() ?: return@Button
                     val cPort = torControl.toIntOrNull() ?: TakerAppConfig.DEFAULT_TOR_CONTROL
-                    val sPort = socksPort.toIntOrNull() ?: TakerAppConfig.DEFAULT_SOCKS_PORT
                     session.saveConfig(
                         TakerAppConfig(
                             rpcHost = rpcHost.trim(),
@@ -131,11 +128,13 @@ fun SettingsScreen(
                             zmqHost = zmqHost.trim(),
                             zmqPort = zPort,
                             torControlPort = cPort,
-                            torSocksHost = socksHost.trim(),
-                            torSocksPort = sPort,
+                            // UniFFI hardcodes SOCKS 127.0.0.1:9050 — always persist that.
+                            torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
+                            torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
                             torAuthPassword = torAuth,
                             walletName = walletName.trim(),
                             walletPassword = walletPassword,
+                            protocol = session.config.protocol,
                         )
                     )
                     walletViewModel.connectWallet()
@@ -151,16 +150,25 @@ fun SettingsScreen(
 
         SettingsCard {
             SectionLabel("TOR")
-            OutlinedTextField(socksHost, { socksHost = it }, label = { Text("SOCKS host") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-            OutlinedTextField(socksPort, { socksPort = it.filter(Char::isDigit) }, label = { Text("SOCKS port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            InfoRow(
+                "SOCKS",
+                "${TakerAppConfig.DEFAULT_SOCKS_HOST}:${TakerAppConfig.DEFAULT_SOCKS_PORT}",
+            )
             OutlinedTextField(torControl, { torControl = it.filter(Char::isDigit) }, label = { Text("Control port") }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedTextField(torAuth, { torAuth = it }, label = { Text("Tor auth password") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            OutlinedTextField(
+                torAuth,
+                { torAuth = it },
+                label = { Text("Tor auth password") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+            )
             Button(
                 onClick = {
                     scope.launch {
                         val socks = TorManager.checkSocks()
                         val ctrl = TorManager.checkControl(
-                            socksHost.trim().ifBlank { TakerAppConfig.DEFAULT_SOCKS_HOST },
+                            TakerAppConfig.DEFAULT_SOCKS_HOST,
                             torControl.toIntOrNull() ?: TakerAppConfig.DEFAULT_TOR_CONTROL,
                         )
                         torStatus = "${socks.message}\n${ctrl.message}"

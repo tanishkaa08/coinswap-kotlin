@@ -30,12 +30,11 @@ class UserSession(context: Context) {
                     ?: TakerAppConfig.DEFAULT_ZMQ_HOST,
                 zmqPort = prefs.getInt(KEY_ZMQ_PORT, TakerAppConfig.DEFAULT_ZMQ_PORT),
                 torControlPort = prefs.getInt(KEY_TOR_CONTROL, TakerAppConfig.DEFAULT_TOR_CONTROL),
-                torSocksHost = prefs.getString(KEY_SOCKS_HOST, TakerAppConfig.DEFAULT_SOCKS_HOST)
-                    ?: TakerAppConfig.DEFAULT_SOCKS_HOST,
-                torSocksPort = prefs.getInt(KEY_SOCKS_PORT, TakerAppConfig.DEFAULT_SOCKS_PORT),
-                torAuthPassword = secrets.getString(KEY_TOR_AUTH, "") ?: "",
-                walletName = prefs.getString(KEY_WALLET_NAME, TakerAppConfig.DEFAULT_WALLET_NAME)
-                    ?: TakerAppConfig.DEFAULT_WALLET_NAME,
+            torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
+            torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
+            torAuthPassword = secrets.getString(KEY_TOR_AUTH, "") ?: "",
+            walletName = prefs.getString(KEY_WALLET_NAME, TakerAppConfig.DEFAULT_WALLET_NAME)
+                ?: TakerAppConfig.DEFAULT_WALLET_NAME,
                 walletPassword = secrets.getString(KEY_WALLET_PASSWORD, "") ?: "",
                 protocol = prefs.getString(KEY_PROTOCOL, TakerAppConfig.DEFAULT_PROTOCOL)
                     ?: TakerAppConfig.DEFAULT_PROTOCOL,
@@ -55,8 +54,8 @@ class UserSession(context: Context) {
             .putString(KEY_ZMQ_HOST, cfg.zmqHost.trim())
             .putInt(KEY_ZMQ_PORT, cfg.zmqPort)
             .putInt(KEY_TOR_CONTROL, cfg.torControlPort)
-            .putString(KEY_SOCKS_HOST, cfg.torSocksHost.trim())
-            .putInt(KEY_SOCKS_PORT, cfg.torSocksPort)
+            .putString(KEY_SOCKS_HOST, TakerAppConfig.DEFAULT_SOCKS_HOST)
+            .putInt(KEY_SOCKS_PORT, TakerAppConfig.DEFAULT_SOCKS_PORT)
             .putString(KEY_WALLET_NAME, cfg.walletName.trim().ifBlank { TakerAppConfig.DEFAULT_WALLET_NAME })
             .putString(KEY_PROTOCOL, cfg.protocol)
             .putBoolean(KEY_LOGGED_IN, markLoggedIn)

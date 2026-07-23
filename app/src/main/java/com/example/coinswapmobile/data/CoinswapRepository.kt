@@ -88,17 +88,26 @@ class CoinswapRepository(
                     password = cfg.walletPassword.ifBlank { null },
                 )
                 try {
-                    runCatching { taker.lockUnspendableUtxos() }
+                    try {
+                        taker.lockUnspendableUtxos()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Non-fatal: some wallets have nothing to lock.
+                    }
                     taker.syncAndSave()
                     val state = snapshotWallet(taker)
                     // Only publish after sync succeeds so callers never see a half-init Taker.
                     TakerHolder.set(taker)
                     state
+                } catch (e: CancellationException) {
+                    TakerHolder.closeQuietly(taker)
+                    throw e
                 } catch (e: Exception) {
-                    runCatching { taker.close() }
+                    TakerHolder.closeQuietly(taker)
                     throw e
                 } catch (e: Error) {
-                    runCatching { taker.close() }
+                    TakerHolder.closeQuietly(taker)
                     throw e
                 }
             }
@@ -202,11 +211,22 @@ class CoinswapRepository(
     ): Result<SwapEstimate> {
         @Suppress("UNUSED_PARAMETER")
         selectedUtxos
-        return listMakers().map { makers ->
+        return listMakers().mapCatching { makers ->
+            fun eligible(m: MakerUiModel): Boolean =
+                m.online &&
+                    amountSats >= m.minSats &&
+                    (m.maxSats <= 0 || amountSats <= m.maxSats) &&
+                    (m.liquiditySats <= 0 || amountSats <= m.liquiditySats)
+
             val selected = if (makerIds.isEmpty()) {
-                makers.filter { it.online }.take(1)
+                makers.filter(::eligible).take(1)
             } else {
-                makers.filter { it.id in makerIds || it.onionAddress in makerIds }
+                makers.filter { m ->
+                    (m.id in makerIds || m.onionAddress in makerIds) && eligible(m)
+                }
+            }
+            if (selected.isEmpty()) {
+                error("No eligible online makers for this amount")
             }
             val fee = selected.sumOf { m ->
                 m.baseFee + ((amountSats * m.feeRatePct) / 100.0).toLong()
@@ -215,7 +235,7 @@ class CoinswapRepository(
                 sendAmountSats = amountSats,
                 totalEstimatedFeeSats = fee,
                 estimatedReceiveSats = (amountSats - fee).coerceAtLeast(0),
-                makerCount = selected.size.coerceAtLeast(1),
+                makerCount = selected.size,
             )
         }
     }
@@ -476,8 +496,11 @@ class CoinswapRepository(
     private suspend fun <T> callFfi(operation: String, block: () -> T): Result<T> =
         withContext(Dispatchers.IO) {
             try {
-                // Lease covers the whole FFI call so clear()/set() cannot close mid-op.
-                Result.success(TakerHolder.withLeased(block))
+                // Serialize + lease so concurrent ViewModels cannot interleave UniFFI
+                // or close the Taker under an in-flight call.
+                TakerHolder.ffiMutex.withLock {
+                    Result.success(TakerHolder.withLeased(block))
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {

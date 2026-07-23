@@ -70,7 +70,7 @@ fun OrbotInstallDialog(
         },
         text = {
             Text(
-                "Orbot is required for Tor.",
+                "Orbot needed if Tor SOCKS is unavailable.",
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )

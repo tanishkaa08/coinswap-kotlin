@@ -1,5 +1,6 @@
 package com.example.coinswapmobile.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.DataInputStream
@@ -40,7 +41,7 @@ object TorManager {
         port: Int,
         timeoutMs: Int,
     ): PortStatus = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             // Keep one socket scope for write + read — closing DataOutputStream would
             // close the socket before the SOCKS5 reply can be read.
             Socket().use { socket ->
@@ -58,7 +59,9 @@ object TorManager {
                 }
             }
             PortStatus(true, host, port, "Tor SOCKS reachable at $host:$port")
-        }.getOrElse { e ->
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             PortStatus(
                 false,
                 host,
@@ -74,12 +77,14 @@ object TorManager {
         label: String,
         timeoutMs: Int,
     ): PortStatus = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             Socket().use { socket ->
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
             }
             PortStatus(true, host, port, "$label reachable at $host:$port")
-        }.getOrElse { e ->
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
             PortStatus(
                 false,
                 host,

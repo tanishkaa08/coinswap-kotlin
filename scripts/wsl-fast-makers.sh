@@ -146,7 +146,7 @@ done
 
 echo "==> [4/5] Start makers..."
 if docker logs coinswap-makerd 2>&1 | grep -q "Listening for requests"; then
-  echo "    maker 1 already listening — skip restart"
+  echo "    maker 1 already listening - skip restart"
 else
   echo "    starting maker 1..."
   start_maker_bg 1 "${NET_PORTS[0]}" "${RPC_PORTS[0]}" "${WALLETS[0]}"

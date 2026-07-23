@@ -49,7 +49,8 @@ data class SwapMaker(
     val liquiditySats: Long,
     val fidelityBondBtc: Double,
     val onionAddress: String,
-    val online: Boolean
+    val online: Boolean,
+    val baseFee: Long = 0,
 )
 
 data class SwapUtxo(
@@ -162,8 +163,20 @@ fun SwapScreen(
             (customOnion.isBlank() || it.onionAddress.contains(customOnion, ignoreCase = true))
     }
     val selectedMakers   = eligibleMakers.take(makerCount)
-    val feePerMakerSats  = (feeRatePerHopPct / 100.0 * amountSatsLong).toLong()
-    val totalSwapFeeSats = feePerMakerSats * makerCount
+    val feePerMakerSats  = if (selectedMakers.isNotEmpty()) {
+        selectedMakers.sumOf { m ->
+            m.baseFee + ((amountSatsLong * m.feeRatePct) / 100.0).toLong()
+        } / selectedMakers.size
+    } else {
+        (feeRatePerHopPct / 100.0 * amountSatsLong).toLong()
+    }
+    val totalSwapFeeSats = if (selectedMakers.isNotEmpty()) {
+        selectedMakers.sumOf { m ->
+            m.baseFee + ((amountSatsLong * m.feeRatePct) / 100.0).toLong()
+        }
+    } else {
+        feePerMakerSats * makerCount
+    }
     // (makers + 1) funding txs × 225 vbytes × sat/vB, scaled by tx splits.
     val fundingTxCount   = (makerCount + 1) * txCount
     val miningFeeSats    = networkFee.satPerVbyte * TX_VBYTES * fundingTxCount
@@ -375,7 +388,7 @@ fun SwapScreen(
         }
 
         SectionCard {
-            SectionLabel("NETWORK FEE")
+            SectionLabel("EST. NETWORK FEE")
             Text(networkFee.description,
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
@@ -612,9 +625,14 @@ fun SwapScreen(
 
         Button(
             onClick = {
-                if (!OrbotHelper.isOrbotInstalled(context)) {
-                    showOrbotDialog = true
-                    return@Button
+                // adb reverse to PC Tor works without Orbot; only prompt when SOCKS is down.
+                if (!vmState.torReachable) {
+                    if (OrbotHelper.isOrbotInstalled(context)) {
+                        OrbotHelper.openOrbotApp(context)
+                    } else {
+                        showOrbotDialog = true
+                        return@Button
+                    }
                 }
                 if (canSwap) swapState = SwapState.CONFIRMING
             },
@@ -656,11 +674,7 @@ fun SwapScreen(
                     txCount         = txCount,
                     manual          = useManualUtxos,
                     selectedUtxos   = if (useManualUtxos) manualSelected else emptyList(),
-                    makerIds        = if (customOnion.isNotBlank()) {
-                        selectedMakers.map { it.onionAddress }
-                    } else {
-                        emptyList()
-                    },
+                    makerIds        = selectedMakers.map { it.onionAddress },
                 )
             },
             onDismiss     = { swapState = SwapState.IDLE }
@@ -768,7 +782,7 @@ private fun SwapSummaryCard(
         SummaryRow("Avg funding TX size", "${TX_VBYTES} vB")
         HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 6.dp))
         SummaryRow("Est. maker fee",     "${formatSats(feePerMakerSats * makerCount)} sats")
-        SummaryRow("Network fee",        "${formatSats(miningFeeSats)} sats  ($networkFeeRate sat/vB)")
+        SummaryRow("Est. network fee",   "${formatSats(miningFeeSats)} sats  ($networkFeeRate sat/vB)")
         HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 6.dp))
         SummaryRow("Total est. fee",     "${formatSats(totalFeeSats)} sats")
         HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 6.dp))
@@ -900,7 +914,7 @@ private fun SwapConfirmDialog(
                 ConfirmRow("Makers",            "$makerCount")
                 if (txCount > 1) ConfirmRow("Transaction splits", "$txCount")
                 ConfirmRow("Maker fee per maker", "${formatSats(feePerMakerSats)} sats")
-                ConfirmRow("Network fee",       "${formatSats(miningFeeSats)} sats")
+                ConfirmRow("Est. network fee",  "${formatSats(miningFeeSats)} sats")
                 ConfirmRow("Coin selection", if (manualCoins > 0) "Manual ($manualCoins coins)" else "Automatic")
                 HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 4.dp))
                 ConfirmRow("Total fees",        "${formatSats(totalFeeSats)} sats")
