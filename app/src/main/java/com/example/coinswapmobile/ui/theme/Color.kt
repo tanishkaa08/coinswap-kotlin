@@ -2,7 +2,6 @@ package com.example.coinswapmobile.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// CoinSwap brand palette
 val Background    = Color(0xFF0D1117)   // near-black background
 val Surface       = Color(0xFF161B22)   // card surface
 val SurfaceAlt    = Color(0xFF1C2128)   // slightly lighter card
@@ -13,8 +12,3 @@ val AccentAmber   = Color(0xFFF0A500)   // warning / recovery
 val TextPrimary   = Color(0xFFE6EDF3)
 val TextSecondary = Color(0xFF8B949E)
 val Divider       = Color(0xFF30363D)
-
-// UTXO privacy dots
-val PrivacyHigh   = TorActive
-val PrivacyMed    = AccentPurple
-val PrivacyLow    = TorInactive

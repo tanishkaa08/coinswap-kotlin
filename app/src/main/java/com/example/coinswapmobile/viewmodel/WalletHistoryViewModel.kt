@@ -11,13 +11,16 @@ import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.model.SwapReportUiModel
 import com.example.coinswapmobile.model.TxUiModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class WalletHistoryUiState(
     val isLoading: Boolean = false,
+    val isLoadingTxs: Boolean = false,
     val transactions: List<TxUiModel> = emptyList(),
     val swaps: List<SwapReportUiModel> = emptyList(),
     val capabilities: NativeCapabilities? = null,
@@ -40,49 +43,95 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun load() {
         if (!session.isLoggedIn) {
-            _state.update { it.copy(isLoading = false, transactions = emptyList(), swaps = emptyList()) }
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    isLoadingTxs = false,
+                    transactions = emptyList(),
+                    swaps = emptyList(),
+                )
+            }
             return
         }
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val showSpinner = _state.value.transactions.isEmpty() && _state.value.swaps.isEmpty()
+            val empty = _state.value.transactions.isEmpty() && _state.value.swaps.isEmpty()
             _state.update {
                 it.copy(
-                    isLoading = showSpinner,
+                    isLoading = empty,
+                    isLoadingTxs = true,
                     errorMessage = null,
                     capabilities = repo.getCapabilities(),
                 )
             }
+
+            val swapsResult = repo.listSwapReports()
+            val swaps = swapsResult.getOrNull().orEmpty()
+                .distinctBy { "${it.id}:${it.status}:${it.startTimestamp}" }
+            val swapsError = swapsResult.exceptionOrNull()?.message
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    swaps = swaps,
+                    errorMessage = swapsError,
+                )
+            }
+
             if (!TakerHolder.isInitialized) {
                 repo.initTaker(session).onFailure { e ->
-                    _state.update { it.copy(isLoading = false, errorMessage = e.message) }
+                    _state.update {
+                        it.copy(
+                            isLoadingTxs = false,
+                            errorMessage = listOfNotNull(e.message, swapsError).joinToString(" • "),
+                        )
+                    }
                     return@launch
                 }
             }
-            val swapsResult = repo.listSwapReports()
-            val swapsError = swapsResult.exceptionOrNull()?.message
-            val swaps = swapsResult.getOrNull().orEmpty().distinctBy { it.id }
 
-            repo.listTransactions()
-                .onSuccess { txs ->
+            val txsDeferred = async {
+                withTimeoutOrNull(TX_LOAD_TIMEOUT_MS) {
+                    repo.listTransactions(count = 40)
+                }
+            }
+            val timed = txsDeferred.await()
+            when {
+                timed == null -> {
                     _state.update {
                         it.copy(
-                            isLoading = false,
-                            transactions = txs,
-                            swaps = swaps,
+                            isLoadingTxs = false,
+                            errorMessage = listOfNotNull(
+                                "Wallet transactions timed out",
+                                swapsError,
+                            ).joinToString(" • "),
+                        )
+                    }
+                }
+                timed.isSuccess -> {
+                    _state.update {
+                        it.copy(
+                            isLoadingTxs = false,
+                            transactions = timed.getOrNull().orEmpty(),
                             errorMessage = swapsError,
                         )
                     }
                 }
-                .onFailure { e ->
+                else -> {
                     _state.update {
                         it.copy(
-                            isLoading = false,
-                            swaps = swaps,
-                            errorMessage = listOfNotNull(e.message, swapsError).joinToString(" • "),
+                            isLoadingTxs = false,
+                            errorMessage = listOfNotNull(
+                                timed.exceptionOrNull()?.message,
+                                swapsError,
+                            ).joinToString(" • "),
                         )
                     }
                 }
+            }
         }
+    }
+
+    private companion object {
+        const val TX_LOAD_TIMEOUT_MS = 25_000L
     }
 }

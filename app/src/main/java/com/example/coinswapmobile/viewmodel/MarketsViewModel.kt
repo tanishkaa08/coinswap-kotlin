@@ -11,6 +11,7 @@ import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.screens.SwapMaker
+import com.example.coinswapmobile.service.SwapExecutionBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -20,10 +21,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class MarketsUiState(
     val makers: List<SwapMaker> = emptyList(),
     val isSyncing: Boolean = false,
+    val syncStatus: String? = null,
     val torReachable: Boolean = false,
     val torStatusMessage: String = "",
     val capabilities: NativeCapabilities? = null,
@@ -62,16 +65,19 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Background auto-sync while the Markets screen is visible. The Rust core
-     * also refreshes the offerbook on its own timer; this keeps the UI in sync
-     * so new makers appear without tapping. Silent: no spinner, no error toast.
+     * Background refresh while Markets is visible.
+     * Loads cached makers immediately; full Tor poll only periodically (not every minute).
      */
     fun startAutoSync() {
         if (autoSyncJob?.isActive == true) return
         autoSyncJob = viewModelScope.launch {
+            runSync(manual = false, pollTor = false)
+            var tick = 0
             while (isActive) {
-                runSync(manual = false)
+                val fullPoll = tick == 0 || tick % FULL_POLL_EVERY_N_TICKS == 0
+                runSync(manual = false, pollTor = fullPoll)
                 delay(AUTO_SYNC_INTERVAL_MS)
+                tick++
             }
         }
     }
@@ -81,10 +87,11 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
         autoSyncJob = null
     }
 
-    private suspend fun runSync(manual: Boolean) {
+    private suspend fun runSync(manual: Boolean, pollTor: Boolean = true) {
         if (!session.isLoggedIn) return
-        // If a sync is already running, let it finish rather than stacking polls.
         if (syncLock.isLocked && !manual) return
+        // Don't open competing Tor circuits while a swap is using Tor.
+        val doTorPoll = pollTor && (manual || !SwapExecutionBus.active.value)
 
         syncLock.withLock {
             val tor = TorManager.checkSocks()
@@ -92,6 +99,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update {
                     it.copy(
                         isSyncing = false,
+                        syncStatus = null,
                         torReachable = false,
                         torStatusMessage = tor.message,
                         errorMessage = if (manual) {
@@ -106,7 +114,13 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
 
             if (manual) {
                 _state.update {
-                    it.copy(isSyncing = true, errorMessage = null, torReachable = true, torStatusMessage = tor.message)
+                    it.copy(
+                        isSyncing = true,
+                        syncStatus = "Loading…",
+                        errorMessage = null,
+                        torReachable = true,
+                        torStatusMessage = tor.message,
+                    )
                 }
             } else {
                 _state.update { it.copy(torReachable = true, torStatusMessage = tor.message) }
@@ -114,19 +128,95 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
 
             if (!TakerHolder.isInitialized) {
                 coinswapRepo.initTaker(session).onFailure { e ->
-                    if (manual) _state.update { it.copy(isSyncing = false, errorMessage = e.message) }
-                    else _state.update { it.copy(isSyncing = false) }
+                    if (manual) {
+                        _state.update {
+                            it.copy(isSyncing = false, syncStatus = null, errorMessage = e.message)
+                        }
+                    } else {
+                        _state.update { it.copy(isSyncing = false, syncStatus = null) }
+                    }
                     return
                 }
             }
 
-            marketRepo.syncOfferbookAndWait()
-                .onSuccess {
+            marketRepo.fetchOffers().onSuccess { cached ->
+                if (cached.isNotEmpty()) {
+                    _state.update {
+                        it.copy(
+                            makers = cached,
+                            errorMessage = null,
+                            syncStatus = if (manual || doTorPoll) "Syncing…" else null,
+                        )
+                    }
+                } else if (manual || doTorPoll) {
+                    _state.update {
+                        it.copy(syncStatus = "Syncing…")
+                    }
+                }
+            }
+
+            if (!doTorPoll && !manual) {
+                _state.update { it.copy(isSyncing = false, syncStatus = null) }
+                return
+            }
+
+            if (manual) {
+                _state.update { it.copy(isSyncing = true) }
+            }
+
+            val syncResult = withTimeoutOrNull(SYNC_TIMEOUT_MS) {
+                marketRepo.syncOfferbookAndWait()
+            }
+
+            when {
+                syncResult == null -> {
+                    marketRepo.fetchOffers().onSuccess { makers ->
+                        _state.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncStatus = null,
+                                makers = makers.ifEmpty { it.makers },
+                                errorMessage = if (manual) {
+                                    "Tor poll timed out — showing cached makers."
+                                } else {
+                                    it.errorMessage
+                                },
+                            )
+                        }
+                    }.onFailure {
+                        _state.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncStatus = null,
+                                errorMessage = if (manual) {
+                                    "Tor poll timed out; could not refresh makers."
+                                } else {
+                                    it.errorMessage
+                                },
+                            )
+                        }
+                    }
+                }
+                syncResult.isFailure -> {
+                    if (manual) {
+                        _state.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncStatus = null,
+                                errorMessage = syncResult.exceptionOrNull()?.message,
+                            )
+                        }
+                    } else {
+                        _state.update { it.copy(isSyncing = false, syncStatus = null) }
+                    }
+                }
+                else -> {
                     marketRepo.fetchOffers()
                         .onSuccess { makers ->
                             _state.update {
                                 it.copy(
                                     isSyncing = false,
+                                    syncStatus = null,
                                     makers = makers,
                                     errorMessage = when {
                                         makers.isNotEmpty() -> null
@@ -137,14 +227,16 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         }
                         .onFailure { e ->
-                            if (manual) _state.update { it.copy(isSyncing = false, errorMessage = e.message) }
-                            else _state.update { it.copy(isSyncing = false) }
+                            if (manual) {
+                                _state.update {
+                                    it.copy(isSyncing = false, syncStatus = null, errorMessage = e.message)
+                                }
+                            } else {
+                                _state.update { it.copy(isSyncing = false, syncStatus = null) }
+                            }
                         }
                 }
-                .onFailure { e ->
-                    if (manual) _state.update { it.copy(isSyncing = false, errorMessage = e.message) }
-                    else _state.update { it.copy(isSyncing = false) }
-                }
+            }
         }
     }
 
@@ -154,6 +246,10 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        const val AUTO_SYNC_INTERVAL_MS = 60_000L
+        /** Cache re-read while Markets is open. */
+        const val AUTO_SYNC_INTERVAL_MS = 45_000L
+        /** Full Tor poll about every ~5 min (45s × 7). */
+        const val FULL_POLL_EVERY_N_TICKS = 7
+        const val SYNC_TIMEOUT_MS = 180_000L
     }
 }

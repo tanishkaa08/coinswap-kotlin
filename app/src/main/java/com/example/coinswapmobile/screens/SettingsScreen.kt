@@ -128,7 +128,6 @@ fun SettingsScreen(
                             zmqHost = zmqHost.trim(),
                             zmqPort = zPort,
                             torControlPort = cPort,
-                            // UniFFI hardcodes SOCKS 127.0.0.1:9050 — always persist that.
                             torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
                             torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
                             torAuthPassword = torAuth,
@@ -137,7 +136,7 @@ fun SettingsScreen(
                             protocol = session.config.protocol,
                         )
                     )
-                    walletViewModel.connectWallet()
+                    walletViewModel.connectWallet(forceReconnect = true)
                     statusMessage = "Saved. Reconnecting taker…"
                 },
                 modifier = Modifier.fillMaxWidth().height(44.dp),

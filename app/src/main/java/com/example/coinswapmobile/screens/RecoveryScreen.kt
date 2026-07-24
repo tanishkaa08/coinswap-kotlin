@@ -23,7 +23,9 @@ import androidx.compose.ui.unit.dp
 import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.SwapRepository
+import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
+import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -38,20 +40,35 @@ data class SwapRecoveryInfo(
 )
 
 object SwapRecovery {
-    private const val SWAP_FILE = "swap.json"
+    private val SWAP_FILES = listOf("swap.json", "swap_state.json")
 
     fun readSwapState(context: Context): SwapRecoveryInfo? {
-        val file = File(FfiEnv.takerDataDir(context), SWAP_FILE)
-        if (!file.exists()) return null
-        return try {
-            val json = JSONObject(file.readText())
-            val status = json.optString("status", "")
-            SwapRecoveryInfo(
-                failed = status.equals("failed", ignoreCase = true),
-                amountSats = json.optLong("amount_sats", 0),
-                lastStatus = json.optString("last_status", status)
-            )
-        } catch (_: Exception) { null }
+        val dir = FfiEnv.takerDataDir(context)
+        for (name in SWAP_FILES) {
+            val file = File(dir, name)
+            if (!file.exists()) continue
+            try {
+                val json = JSONObject(file.readText())
+                val status = json.optString(
+                    "status",
+                    json.optString("phase", json.optString("last_status", "")),
+                )
+                val failed = status.contains("fail", ignoreCase = true) ||
+                    status.contains("recover", ignoreCase = true) ||
+                    status.contains("incomplete", ignoreCase = true) ||
+                    File(dir, "recovery_in_progress").exists()
+                return SwapRecoveryInfo(
+                    failed = failed,
+                    amountSats = json.optLong("amount_sats", json.optLong("amountSats", 0)),
+                    lastStatus = json.optString("last_status", status),
+                )
+            } catch (_: Exception) {
+            }
+        }
+        if (File(dir, "recovery_in_progress").exists()) {
+            return SwapRecoveryInfo(failed = true, amountSats = 0, lastStatus = "recovery_in_progress")
+        }
+        return null
     }
 
     fun isFailedSwap(context: Context): Boolean = readSwapState(context)?.failed == true
@@ -72,9 +89,9 @@ fun RecoveryScreen(
     var logs by remember { mutableStateOf(listOf<String>()) }
     var isRunning by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val logScroll = rememberScrollState()
     val repo = remember { CoinswapRepository(FfiEnv.takerDataDir(context)) }
     val swapRepo = remember { SwapRepository(repo) }
+    val session = remember { UserSession(context) }
 
     fun appendLog(line: String) { logs = logs + line }
 
@@ -83,6 +100,35 @@ fun RecoveryScreen(
         isRunning = true
         logs = emptyList()
         uiState = RecoveryUiState.InProgress
+
+        appendLog("[recovery] Checking Tor SOCKS…")
+        val tor = TorManager.checkSocks()
+        appendLog("[recovery] ${tor.message}")
+        if (!tor.reachable) {
+            appendLog("[recovery] Tor required")
+            uiState = RecoveryUiState.Failed
+            isRunning = false
+            return
+        }
+
+        if (!session.isLoggedIn) {
+            appendLog("[recovery] Not logged in")
+            uiState = RecoveryUiState.Failed
+            isRunning = false
+            return
+        }
+
+        if (!TakerHolder.isInitialized) {
+            appendLog("[recovery] Initializing Taker…")
+            val init = repo.initTaker(session)
+            if (init.isFailure) {
+                appendLog("[recovery] Taker.init failed: ${init.exceptionOrNull()?.message}")
+                uiState = RecoveryUiState.Failed
+                isRunning = false
+                return
+            }
+            appendLog("[recovery] Taker ready")
+        }
 
         appendLog("[recovery] Checking local swap state + calling UniFFI recoverActiveSwap…")
         val detect = repo.detectRecoverableSwaps()
@@ -108,10 +154,6 @@ fun RecoveryScreen(
 
     LaunchedEffect(Unit) {
         if (autoStart) runRecovery()
-    }
-
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) logScroll.scrollTo(logScroll.maxValue)
     }
 
     Column(
@@ -172,7 +214,7 @@ fun RecoveryScreen(
                     }
                 }
                 RecoveryUiState.Complete -> {
-                    Text("Recovery complete",
+                    Text("Recovery started",
                         style = MaterialTheme.typography.titleMedium,
                         color = TorActive)
                 }
@@ -265,24 +307,19 @@ fun RecoveryScreen(
         }
 
         if (logs.isNotEmpty() || uiState == RecoveryUiState.InProgress) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 240.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(SurfaceAlt)
-                    .padding(12.dp)
-            ) {
-                Text("RECOVERY LOG",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-                Spacer(Modifier.height(6.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .verticalScroll(logScroll),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                        .heightIn(min = 120.dp, max = 240.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SurfaceAlt)
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
+                    Text("RECOVERY LOG",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary)
+                    Spacer(Modifier.height(6.dp))
                     logs.forEach { line ->
                         Text(line,
                             style = MaterialTheme.typography.labelSmall,
@@ -293,7 +330,6 @@ fun RecoveryScreen(
                                         TorInactive else TextPrimary)
                     }
                 }
-            }
         }
 
             Spacer(Modifier.height(16.dp))

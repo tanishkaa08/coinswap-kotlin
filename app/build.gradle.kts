@@ -101,6 +101,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // Decode core-lib swap_tracker.cbor (same source taker-app polls for live phases)
+    implementation("com.upokecenter:cbor:4.5.3") {
+        exclude(group = "com.github.peteroupc", module = "datautilities")
+    }
 
     // Required by generated UniFFI Kotlin (loads libcoinswap_ffi via JNA)
     implementation("net.java.dev.jna:jna:5.13.0@aar")

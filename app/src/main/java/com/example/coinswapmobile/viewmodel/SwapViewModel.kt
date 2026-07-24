@@ -13,10 +13,13 @@ import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.model.PreparedSwap
 import com.example.coinswapmobile.screens.SwapMaker
 import com.example.coinswapmobile.screens.SwapUtxo
+import com.example.coinswapmobile.service.SwapExecutionBus
+import com.example.coinswapmobile.service.SwapForegroundService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class SwapUiState(
     val isLoading: Boolean = true,
@@ -45,7 +48,29 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     )
     val uiState = _state.asStateFlow()
 
-    init { loadWalletData() }
+    init {
+        loadWalletData()
+        viewModelScope.launch {
+            SwapExecutionBus.events.collect { event ->
+                _state.update {
+                    it.copy(
+                        isSwapping = event.isRunning,
+                        swapPhase = event.phase ?: it.swapPhase,
+                        lastSwapId = event.swapId ?: it.lastSwapId,
+                        swapError = when {
+                            event.failed -> event.errorMessage ?: "Swap failed"
+                            event.completed -> null
+                            else -> it.swapError
+                        },
+                        preparedSwap = if (event.completed || event.failed) null else it.preparedSwap,
+                    )
+                }
+                if (event.completed || event.failed) {
+                    loadWalletData()
+                }
+            }
+        }
+    }
 
     fun loadWalletData() {
         if (!session.isLoggedIn) {
@@ -74,7 +99,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             }
             coinswapRepo.getBalance()
                 .onSuccess { state ->
-                    // SeedCoin / SweptCoin only (IncomingSwapCoin is unsweepable here)
                     val utxos = state.utxos
                         .filter { u ->
                             u.spendable && (u.spendType == "SeedCoin" || u.spendType == "SweptCoin")
@@ -146,7 +170,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            // Manual mode: require a selection from a single pool
             if (manual) {
                 if (selectedUtxos.isEmpty()) {
                     _state.update { it.copy(swapError = "Select at least one coin") }
@@ -155,23 +178,28 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 val pools = selectedUtxos.map { poolOf(it.spendType) }.toSet()
                 if (pools.size > 1) {
                     _state.update {
-                        it.copy(swapError = "Cannot mix regular and swap coins. Use one pool.")
+                        it.copy(swapError = "Cannot mix regular and swap coins")
                     }
                     return@launch
                 }
             }
             _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing wallet…") }
+            SwapExecutionBus.emit(
+                SwapExecutionBus.Event(
+                    swapId = null,
+                    phase = "Syncing wallet…",
+                    isRunning = true,
+                ),
+            )
             coinswapRepo.syncWallet()
                 .onFailure { e ->
-                    _state.update { it.copy(isSwapping = false, swapError = e.message) }
+                    failSwap(e.message)
                     return@launch
                 }
             if (manual) {
                 val balance = coinswapRepo.getBalance()
                 if (balance.isFailure) {
-                    _state.update {
-                        it.copy(isSwapping = false, swapError = balance.exceptionOrNull()?.message)
-                    }
+                    failSwap(balance.exceptionOrNull()?.message)
                     return@launch
                 }
                 val freshUtxos = balance.getOrNull()?.utxos.orEmpty()
@@ -179,67 +207,92 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
                 }
                 if (invalid.isNotEmpty()) {
-                    _state.update {
-                        it.copy(
-                            isSwapping = false,
-                            swapError = "Selected coins are locked or tied to a previous swap. Sync and pick different coins.",
-                        )
-                    }
+                    failSwap("Selected coins are locked")
                     return@launch
                 }
             }
-            _state.update { it.copy(swapPhase = "Syncing offerbook…") }
-            coinswapRepo.syncOfferbook().onFailure { e ->
-                _state.update { it.copy(isSwapping = false, swapError = e.message, swapPhase = null) }
+            _state.update { it.copy(swapPhase = "Checking makers…") }
+            // Fresh Tor poll so we don't start against stale "online" makers.
+            val offerSync = withTimeoutOrNull(PRE_SWAP_OFFER_SYNC_MS) {
+                coinswapRepo.syncOfferbook()
+            }
+            if (offerSync == null) {
+                _state.update { it.copy(swapPhase = "Maker check timed out — using cache…") }
+            } else if (offerSync.isFailure) {
+                failSwap(
+                    offerSync.exceptionOrNull()?.message
+                        ?: "Could not reach makers over Tor",
+                )
                 return@launch
             }
+
+            val makers = coinswapRepo.listMakers().getOrElse { e ->
+                failSwap(e.message)
+                return@launch
+            }
+            val online = makers.filter { it.online }
+            val preferred = if (makerIds.isNotEmpty()) {
+                makerIds.filter { id ->
+                    online.any { it.onionAddress == id || it.id == id }
+                }
+            } else {
+                online.take(makerCount).map { it.onionAddress }
+            }
+            if (preferred.size < makerCount) {
+                failSwap(
+                    "Only ${preferred.size} reachable maker(s); need $makerCount. Sync Markets and retry with 1 maker.",
+                )
+                return@launch
+            }
+
             _state.update { it.copy(swapPhase = "Preparing…") }
             swapRepo.prepareCoinswap(
                 amountSats = amountSats,
                 makerCount = makerCount,
                 selectedUtxos = selectedUtxos,
                 txCount = txCount,
-                makerIds = makerIds,
+                makerIds = preferred.take(makerCount),
                 protocol = protocol,
                 manualSelection = manual,
             )
                 .onSuccess { prepared ->
                     _state.update {
-                        it.copy(preparedSwap = prepared, swapPhase = "Executing coinswap…")
+                        it.copy(
+                            preparedSwap = prepared,
+                            lastSwapId = prepared.swapId,
+                            swapPhase = "Executing coinswap…",
+                            isSwapping = true,
+                        )
                     }
-                    swapRepo.startCoinswap(prepared)
-                        .onSuccess { report ->
-                            _state.update {
-                                it.copy(
-                                    isSwapping = false,
-                                    lastSwapId = report.id,
-                                    swapPhase = "Completed: ${report.status}",
-                                    preparedSwap = null,
-                                )
-                            }
-                            loadWalletData()
-                        }
-                        .onFailure { e ->
-                            _state.update {
-                                it.copy(
-                                    isSwapping = false,
-                                    swapError = e.message,
-                                    swapPhase = "Failed during execution",
-                                )
-                            }
-                        }
+                    SwapForegroundService.start(getApplication(), prepared)
                 }
                 .onFailure { e ->
-                    _state.update { it.copy(isSwapping = false, swapError = e.message, swapPhase = null) }
+                    failSwap(e.message)
                 }
         }
+    }
+
+    private fun failSwap(message: String?) {
+        SwapExecutionBus.emit(
+            SwapExecutionBus.Event(
+                swapId = null,
+                phase = null,
+                isRunning = false,
+                failed = true,
+                errorMessage = message,
+            ),
+        )
+        _state.update { it.copy(isSwapping = false, swapError = message, swapPhase = null) }
     }
 
     fun clearSwapResult() {
         _state.update { it.copy(swapError = null, swapPhase = null, lastSwapId = null) }
     }
 
-    /** SeedCoin -> regular; otherwise swap pool. */
     private fun poolOf(spendType: String?): String =
         if (spendType == null || spendType == "SeedCoin") "regular" else "swap"
+
+    private companion object {
+        const val PRE_SWAP_OFFER_SYNC_MS = 120_000L
+    }
 }

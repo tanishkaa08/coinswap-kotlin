@@ -1,6 +1,7 @@
 package com.example.coinswapmobile.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,9 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -25,6 +30,7 @@ import com.example.coinswapmobile.viewmodel.WalletHistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun WalletHistoryScreen(
@@ -41,166 +47,220 @@ fun WalletHistoryScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val failed = remember(vmState.swaps) {
+        vmState.swaps.filter { it.status == SwapReportUiModel.Status.FAILED }
+    }
+    val recovered = remember(vmState.swaps) {
+        vmState.swaps.filter { it.status == SwapReportUiModel.Status.RECOVERED }
+    }
+    val completed = remember(vmState.swaps) {
+        vmState.swaps.filter { it.status == SwapReportUiModel.Status.COMPLETED }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("Transaction History",
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary)
+            Text("History", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
         }
 
         vmState.errorMessage?.let { msg ->
             item {
-                Text("⚠  $msg", style = MaterialTheme.typography.labelSmall, color = TorInactive)
+                Text(msg, style = MaterialTheme.typography.labelSmall, color = TorInactive)
             }
         }
 
-        if (vmState.isLoading) {
+        if (vmState.isLoading && vmState.swaps.isEmpty()) {
             item {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(24.dp),
-                    color = TorActive,
-                    strokeWidth = 2.dp
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        color = TorActive,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
             }
         } else {
-            if (vmState.swaps.isNotEmpty()) {
-                item {
-                    Spacer(Modifier.height(6.dp))
-                    Text("SWAPS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary)
+            if (failed.isNotEmpty()) {
+                item { SectionLabel("FAILED") }
+                items(failed, key = { "fail-${it.id}-${it.startTimestamp}" }) {
+                    SwapCard(it)
                 }
-                items(
-                    items = vmState.swaps,
-                    key = { "swap-${it.id}-${it.status}-${it.startTimestamp}" },
-                ) { swap -> SwapRow(swap) }
+            }
+            if (recovered.isNotEmpty()) {
+                item { SectionLabel("RECOVERED") }
+                items(recovered, key = { "rec-${it.id}-${it.startTimestamp}" }) {
+                    SwapCard(it)
+                }
+            }
+            if (completed.isNotEmpty()) {
+                item { SectionLabel("COMPLETED") }
+                items(completed, key = { "ok-${it.id}-${it.startTimestamp}" }) {
+                    SwapCard(it)
+                }
+            }
+            if (vmState.swaps.isEmpty()) {
+                item { EmptyHint("No swaps yet") }
             }
 
-            item {
-                Spacer(Modifier.height(6.dp))
-                Text("WALLET TRANSACTIONS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary)
-            }
-            if (vmState.transactions.isEmpty() && !vmState.isLoading) {
-                item {
-                    Text("No transactions yet.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary)
+            item { SectionLabel("TRANSACTIONS") }
+            when {
+                vmState.isLoadingTxs && vmState.transactions.isEmpty() -> {
+                    item { EmptyHint("Loading…") }
                 }
-            } else {
-                itemsIndexed(
-                    items = vmState.transactions,
-                    key = { i, tx -> "tx-$i-${tx.txid}-${tx.amountSats}-${tx.confirmations}" },
-                ) { _, tx -> TxRow(tx) }
+                vmState.transactions.isEmpty() -> {
+                    item { EmptyHint("No transactions yet") }
+                }
+                else -> {
+                    itemsIndexed(
+                        items = vmState.transactions,
+                        key = { i, tx -> "tx-$i-${tx.txid}-${tx.amountSats}-${tx.confirmations}" },
+                    ) { _, tx -> TxRow(tx) }
+                }
             }
         }
     }
 }
 
-private enum class TxKind(val label: String) {
-    MINING("Mining reward"),
-    RECEIVED("Received"),
-    SENT("Sent"),
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = TextSecondary,
+        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+    )
 }
+
+@Composable
+private fun EmptyHint(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = TextSecondary,
+        modifier = Modifier.padding(vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun SwapCard(swap: SwapReportUiModel) {
+    val statusColor = when (swap.status) {
+        SwapReportUiModel.Status.COMPLETED -> TorActive
+        SwapReportUiModel.Status.RECOVERED -> AccentAmber
+        SwapReportUiModel.Status.FAILED -> TorInactive
+    }
+    val timeLabel = formatUnix(swap.startTimestamp)
+    val meta = buildList {
+        if (swap.makerCount > 0) add("${swap.makerCount} makers")
+        if (swap.totalFeeSats > 0) add("%,d fee".format(swap.totalFeeSats))
+        if (timeLabel != null) add(timeLabel)
+    }.joinToString(" · ")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Surface)
+            .border(1.dp, statusColor.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .height(36.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(statusColor),
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                text = if (swap.amountSats > 0) "%,d sats".format(swap.amountSats) else "—",
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (meta.isNotBlank()) {
+                Text(
+                    meta,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (swap.status == SwapReportUiModel.Status.FAILED && !swap.errorMessage.isNullOrBlank()) {
+                Text(
+                    swap.errorMessage,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TorInactive,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private enum class TxKind { IN, OUT, MINING }
 
 private fun TxUiModel.kind(): TxKind {
     val cat = category?.lowercase().orEmpty()
     return when {
         cat.contains("generate") || cat.contains("immature") || cat.contains("coinbase") -> TxKind.MINING
-        direction == "outgoing" || direction == "sent" || amountSats < 0 -> TxKind.SENT
-        else -> TxKind.RECEIVED
-    }
-}
-
-@Composable
-private fun SwapRow(swap: SwapReportUiModel) {
-    val (statusLabel, statusColor) = when (swap.status) {
-        SwapReportUiModel.Status.COMPLETED -> "Completed" to TorActive
-        SwapReportUiModel.Status.RECOVERED -> "Recovered" to AccentAmber
-        SwapReportUiModel.Status.FAILED -> "Failed" to TorInactive
-    }
-    val timeLabel = swap.startTimestamp?.let { ts ->
-        if (ts > 0) SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(ts * 1000)) else null
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Surface)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("Coinswap • $statusLabel",
-                style = MaterialTheme.typography.bodyMedium,
-                color = statusColor)
-            Text("%,d sats".format(swap.amountSats),
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextPrimary)
-        }
-        Text(
-            "${swap.makerCount} maker(s) • fee ${"%,d".format(swap.totalFeeSats)} sats",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
-        )
-        (timeLabel ?: swap.errorMessage)?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-        }
+        direction == "outgoing" || direction == "sent" || amountSats < 0 -> TxKind.OUT
+        else -> TxKind.IN
     }
 }
 
 @Composable
 private fun TxRow(tx: TxUiModel) {
-    val timeLabel = tx.timestamp?.let { ts ->
-        if (ts > 0) SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(ts * 1000))
-        else "unconfirmed"
-    } ?: if (tx.confirmed) "confirmed" else "unconfirmed"
-
     val kind = tx.kind()
-    Column(
+    val absAmount = abs(tx.amountSats)
+    val (label, amountText, amountColor) = when (kind) {
+        TxKind.OUT -> Triple("Sent", "−%,d".format(absAmount), AccentAmber)
+        TxKind.MINING -> Triple("Mined", "+%,d".format(absAmount), TorActive)
+        TxKind.IN -> Triple("Received", "+%,d".format(absAmount), TorActive)
+    }
+    val timeLabel = formatUnix(tx.timestamp)
+    val meta = buildList {
+        if (timeLabel != null) add(timeLabel)
+        if (tx.confirmed) add("${tx.confirmations} conf") else add("Pending")
+    }.joinToString(" · ")
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(Surface)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .border(1.dp, Divider, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                kind.label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = when (kind) {
-                    TxKind.SENT -> AccentAmber
-                    TxKind.MINING -> AccentPurple
-                    TxKind.RECEIVED -> TorActive
-                }
-            )
-            Text("%,d sats".format(tx.amountSats),
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextPrimary)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(label, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+            Text(meta, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
         }
         Text(
-            (if (tx.txid.length > 16) tx.txid.take(16) + "…" else tx.txid).ifBlank { "(no txid)" },
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
-        )
-        Text(
-            "$timeLabel • ${tx.confirmations} conf",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary
+            "$amountText sats",
+            style = MaterialTheme.typography.bodyMedium,
+            color = amountColor,
         )
     }
+}
+
+private fun formatUnix(ts: Long?): String? {
+    if (ts == null || ts <= 0L) return null
+    return SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()).format(Date(ts * 1000))
 }

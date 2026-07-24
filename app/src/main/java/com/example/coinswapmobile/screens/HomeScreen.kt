@@ -28,7 +28,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.coinswapmobile.components.OrbotHelper
 import com.example.coinswapmobile.components.OrbotInstallDialog
 import com.example.coinswapmobile.components.OrbotPromptBanner
-import com.example.coinswapmobile.components.PrivacyLevel
 import com.example.coinswapmobile.components.TorStatusBadge
 import com.example.coinswapmobile.components.UtxoCard
 import com.example.coinswapmobile.components.UtxoItem
@@ -179,7 +178,8 @@ private fun HomeBalanceCard(
         AnimatedContent(
             targetState = balanceVisible,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
-            label = "balance"
+            label = "balance",
+            modifier = Modifier.clickable(onClick = onToggleVisibility),
         ) { visible ->
             if (uiState.isLoading && !uiState.isInitialized) {
                 CircularProgressIndicator(
@@ -194,19 +194,6 @@ private fun HomeBalanceCard(
                     color = TextPrimary
                 )
             }
-        }
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(20.dp))
-                .background(SurfaceAlt)
-                .clickable(onClick = onToggleVisibility)
-                .padding(horizontal = 16.dp, vertical = 5.dp)
-        ) {
-            Text(
-                text = if (balanceVisible) "Tap to hide" else "Tap to reveal",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
         }
     }
 }
@@ -240,17 +227,19 @@ private fun HomeUtxoSectionHeader(count: Int, isLoading: Boolean, onSync: () -> 
 }
 
 private fun UtxoUiModel.toUtxoItem(): UtxoItem {
-    // Match swap-flow classification: SeedCoin = regular/exposed; else swap/mixed privacy.
-    val privacy = when {
-        spendType == null || spendType == "SeedCoin" -> PrivacyLevel.LOW
-        spendType.contains("Swap", ignoreCase = true) -> PrivacyLevel.HIGH
-        else -> PrivacyLevel.MED
+    val kind = when {
+        spendType == null || spendType == "SeedCoin" -> "Regular"
+        spendType.contains("Swap", ignoreCase = true) ||
+            spendType.contains("Swept", ignoreCase = true) -> "From swap"
+        spendType.contains("Contract", ignoreCase = true) -> "Locked"
+        else -> "Coin"
     }
     val shortId = if (txid.length > 8) "${txid.take(8)}…:$vout" else "$txid:$vout"
     return UtxoItem(
-        address = shortId,
-        amountBtc = "%.8f".format(amountSats / 100_000_000.0),
-        privacyLevel = privacy,
+        id = shortId,
+        amountSats = amountSats,
+        kind = kind,
+        confirmed = (confirmations ?: 0) > 0,
     )
 }
 

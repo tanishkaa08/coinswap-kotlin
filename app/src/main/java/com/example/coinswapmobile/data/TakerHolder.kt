@@ -27,6 +27,12 @@ object TakerHolder {
     val ffiMutex = Mutex()
 
     /**
+     * Serializes long-running Tor/swap FFI so offerbook sync and startCoinswap
+     * never interleave, while short reads still use [ffiMutex] alone.
+     */
+    val longOpMutex = Mutex()
+
+    /**
      * Hold a lease for the duration of [block]. [require] is only safe inside this.
      * When the last lease ends, every retired Taker is closed.
      */
@@ -95,7 +101,6 @@ object TakerHolder {
         } catch (_: CancellationException) {
             throw CancellationException("Taker.close cancelled")
         } catch (_: Exception) {
-            // Best-effort dispose of UniFFI handle.
         }
     }
 }

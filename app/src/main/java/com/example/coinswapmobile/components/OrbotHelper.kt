@@ -68,13 +68,6 @@ fun OrbotInstallDialog(
         title = {
             Text("Install Orbot", color = TextPrimary)
         },
-        text = {
-            Text(
-                "Orbot needed if Tor SOCKS is unavailable.",
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        },
         confirmButton = {
             Button(
                 onClick = {
@@ -83,7 +76,7 @@ fun OrbotInstallDialog(
                 },
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = TorActive),
             ) {
-                Text("Install Orbot", color = Color.Black)
+                Text("Install", color = Color.Black)
             }
         },
         dismissButton = {
@@ -91,7 +84,7 @@ fun OrbotInstallDialog(
                 onDismiss()
                 onInstalledCheck?.invoke()
             }) {
-                Text("I already have it", color = TextSecondary)
+                Text("Cancel", color = TextSecondary)
             }
         },
     )
@@ -103,7 +96,7 @@ fun OrbotPromptBanner(
     onInstallClick: () -> Unit,
 ) {
     Text(
-        "Tor unreachable.",
+        "Tor unreachable",
         color = TorInactive,
         style = MaterialTheme.typography.labelSmall,
         modifier = modifier

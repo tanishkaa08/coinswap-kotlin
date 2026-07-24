@@ -43,9 +43,13 @@ if ($StopOrbot) {
 Write-Host "Setting adb reverse on $Device ..."
 Invoke-AdbRequired -CommandArgs @("reverse", "tcp:18442", "tcp:18442")
 Invoke-AdbRequired -CommandArgs @("reverse", "tcp:28332", "tcp:28332")
-# Removals may fail if nothing was mapped - ignore.
-& adb @adbArgs reverse --remove tcp:9050 2>$null
-& adb @adbArgs reverse --remove tcp:9051 2>$null
+Invoke-AdbRequired -CommandArgs @("reverse", "tcp:38332", "tcp:38332")
+# Removals may fail if nothing was mapped - ignore (don't trip $ErrorActionPreference Stop).
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& adb @adbArgs reverse --remove tcp:9050 2>$null | Out-Null
+& adb @adbArgs reverse --remove tcp:9051 2>$null | Out-Null
+$ErrorActionPreference = $prevEap
 Invoke-AdbRequired -CommandArgs @("reverse", "tcp:9050", "tcp:19050")
 Invoke-AdbRequired -CommandArgs @("reverse", "tcp:9051", "tcp:19051")
 

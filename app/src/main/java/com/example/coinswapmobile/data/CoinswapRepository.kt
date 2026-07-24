@@ -66,8 +66,13 @@ class CoinswapRepository(
         missingApis = emptyList(),
     )
 
-    suspend fun initTaker(session: UserSession): Result<WalletState> =
+    suspend fun initTaker(session: UserSession, forceReconnect: Boolean = false): Result<WalletState> =
         TakerHolder.initMutex.withLock {
+            if (TakerHolder.isInitialized && !forceReconnect) {
+                return@withLock callFfi("getBalances") {
+                    snapshotWallet(TakerHolder.require())
+                }
+            }
             callFfi("Taker.init") {
                 FfiEnv.ensureHome(appDataDir)
                 val cfg = session.config
@@ -161,7 +166,6 @@ class CoinswapRepository(
             feeRate = feeRateSatPerVb.toDouble(),
             manuallySelectedOutpoints = selected,
         )
-        // Estimate fee from rate × typical P2WPKH tx size (matches SendScreen).
         val feeSats = (feeRateSatPerVb * 225L).coerceAtLeast(0)
         SendResult(txid = txid.value, amountSats = amountSats, feeSats = feeSats)
     }
@@ -189,10 +193,18 @@ class CoinswapRepository(
                 }
         }
 
-    suspend fun syncOfferbook(): Result<Unit> = callFfi("syncOfferbookAndWait") {
-        clearOfferbookCache()
-        TakerHolder.require().syncOfferbookAndWait()
-    }
+    /**
+     * Poll makers over Tor. Does **not** delete offerbook.json — wiping the cache
+     * forced a cold re-discovery every tap and made Marketplace look broken.
+     * Pass [forceClearCache] only when makers are stuck stale.
+     *
+     * Uses [callFfiLong] so History/balance reads are not blocked for the whole poll.
+     */
+    suspend fun syncOfferbook(forceClearCache: Boolean = false): Result<Unit> =
+        callFfiLong("syncOfferbookAndWait") {
+            if (forceClearCache) clearOfferbookCache()
+            TakerHolder.require().syncOfferbookAndWait()
+        }
 
     /** Drop cached maker states so a fresh Tor poll runs (fixes stuck offline makers). */
     fun clearOfferbookCache() {
@@ -248,7 +260,6 @@ class CoinswapRepository(
         txCount: Int = 1,
         protocol: String = "Legacy",
     ): Result<PreparedSwap> = callFfi("prepareCoinswap") {
-        // SwapParams has no fee-rate field in UniFFI; network fee is UI estimate only.
         val outpoints = selectedUtxos.takeIf { it.isNotEmpty() }?.map { u ->
             OutPoint(txid = Txid(value = u.txid), vout = u.vout.toUInt())
         }
@@ -270,7 +281,7 @@ class CoinswapRepository(
     }
 
     suspend fun startCoinswap(prepared: PreparedSwap): Result<SwapReportUiModel> =
-        callFfi("startCoinswap") {
+        callFfiLong("startCoinswap") {
             val report = TakerHolder.require().startCoinswap(prepared.swapId)
             val ui = report.toUiModel(protocol = prepared.protocol)
             persistSwapReport(report, protocol = prepared.protocol)
@@ -287,9 +298,12 @@ class CoinswapRepository(
         )
     }
 
-    /** Reads reports written by Rust under `swap_reports/` (same layout as desktop). */
+    /**
+     * Swap history: local swap_reports JSON files plus Rust wallet swap_report.json
+     * (includes Failed swaps that UniFFI surfaces as errors).
+     */
     suspend fun listSwapReports(): Result<List<SwapReportUiModel>> = withContext(Dispatchers.IO) {
-        Result.success(loadSwapReportsFromDisk())
+        Result.success(loadAllSwapReports())
     }
 
     /**
@@ -318,25 +332,21 @@ class CoinswapRepository(
                 }
             }
         }
-        // Always allow one recovery attempt entry when taker is up (desktop "Force Recovery")
-        if (found.isEmpty() && TakerHolder.isInitialized) {
-            found += RecoverableSwap(
-                swapId = "active",
-                phase = "recover_active_swap",
-                recoverable = true,
-            )
-        }
+        // Only surface real failure markers — do not invent a recovery entry.
         Result.success(found.distinctBy { it.swapId })
     }
 
     suspend fun recoverActiveSwap(swapId: String = ""): Result<String> =
-        callFfi("recoverActiveSwap") {
+        callFfiLong("recoverActiveSwap") {
             TakerHolder.require().recoverActiveSwap()
-            // Clear local failure markers after successful recovery
-            listOf("swap.json", "swap_state.json").forEach { name ->
-                runCatching { File(appDataDir, name).delete() }
+            // Keep failure markers until funds are visibly swept; clearing them
+            // early skips Recovery on next launch while CSV timelock still holds coins.
+            runCatching {
+                File(appDataDir, "recovery_in_progress").writeText(
+                    "${System.currentTimeMillis()}\n$swapId",
+                )
             }
-            swapId.ifBlank { "recovery complete" }
+            swapId.ifBlank { "recovery loop started" }
         }
 
     suspend fun backupWallet(destinationPath: String, password: String? = null): Result<Unit> =
@@ -458,39 +468,120 @@ class CoinswapRepository(
         }
     }
 
-    private fun loadSwapReportsFromDisk(): List<SwapReportUiModel> {
+    private fun loadAllSwapReports(): List<SwapReportUiModel> {
+        // Keep Failed + Recovered for the same swap_id as separate rows.
+        val byKey = LinkedHashMap<String, SwapReportUiModel>()
+        fun put(report: SwapReportUiModel) {
+            byKey["${report.id}:${report.status}"] = report
+        }
+        loadLocalSwapReportFiles().forEach(::put)
+        loadRustWalletSwapReports().forEach(::put)
+        return byKey.values.sortedByDescending { it.startTimestamp ?: 0L }
+    }
+
+    private fun loadSwapReportsFromDisk(): List<SwapReportUiModel> = loadAllSwapReports()
+
+    private fun loadLocalSwapReportFiles(): List<SwapReportUiModel> {
         val dir = File(appDataDir, "swap_reports")
         if (!dir.isDirectory) return emptyList()
         return dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }
             ?.mapNotNull { file ->
-                runCatching {
-                    val json = JSONObject(file.readText())
-                    val statusRaw = json.optString("status", "COMPLETED")
-                    val status = when {
-                        statusRaw.contains("fail", true) -> SwapReportUiModel.Status.FAILED
-                        statusRaw.contains("recover", true) -> SwapReportUiModel.Status.RECOVERED
-                        else -> SwapReportUiModel.Status.COMPLETED
-                    }
-                    SwapReportUiModel(
-                        id = json.optString("swap_id", json.optString("swapId", file.nameWithoutExtension)),
-                        status = status,
-                        startTimestamp = json.optLong("start_timestamp", json.optLong("startTimestamp")).takeIf { it > 0 },
-                        durationSeconds = json.optDouble("swap_duration_seconds", json.optDouble("durationSeconds", 0.0)),
-                        amountSats = json.optLong("outgoing_amount", json.optLong("amountSats")),
-                        outputSats = json.optLong("incoming_amount", json.optLong("outputSats")),
-                        totalFeeSats = kotlin.math.abs(
-                            json.optLong("totalFeeSats", json.optLong("fee_paid"))
-                        ),
-                        makerCount = json.optInt("maker_count", json.optInt("makerCount", 1)),
-                        hops = json.optInt("hops", json.optInt("makerCount", 1)),
-                        protocol = json.optString("protocol", "LEGACY"),
-                        errorMessage = json.optString("error_message", json.optString("errorMessage"))
-                            .takeIf { it.isNotBlank() },
-                    )
-                }.getOrNull()
+                parseReportJsonObject(
+                    JSONObject(file.readText()),
+                    file.nameWithoutExtension,
+                    forceRecovered = false,
+                )
             }
-            ?.sortedByDescending { it.startTimestamp ?: 0L }
             .orEmpty()
+    }
+
+    /** Core lib writes taker + recovery arrays under wallets/. */
+    private fun loadRustWalletSwapReports(): List<SwapReportUiModel> {
+        val walletsDir = File(appDataDir, "wallets")
+        if (!walletsDir.isDirectory) return emptyList()
+        return walletsDir.listFiles { f ->
+            f.isFile && f.name.endsWith("_swap_report.json")
+        }.orEmpty().flatMap { file ->
+            runCatching {
+                val root = JSONObject(file.readText())
+                val out = mutableListOf<SwapReportUiModel>()
+                root.optJSONArray("taker")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        parseReportJsonObject(obj, "unknown", forceRecovered = false)?.let { out += it }
+                    }
+                }
+                root.optJSONArray("recovery")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        parseReportJsonObject(obj, "unknown", forceRecovered = true)?.let { out += it }
+                    }
+                }
+                out
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    private fun parseReportJsonObject(
+        json: JSONObject,
+        fallbackId: String,
+        forceRecovered: Boolean,
+    ): SwapReportUiModel? =
+        runCatching {
+            val statusRaw = json.optString("status", "COMPLETED")
+            val status = when {
+                forceRecovered || statusRaw.contains("recover", true) ->
+                    SwapReportUiModel.Status.RECOVERED
+                statusRaw.contains("fail", true) -> SwapReportUiModel.Status.FAILED
+                else -> SwapReportUiModel.Status.COMPLETED
+            }
+            val makers = json.optInt(
+                "makers_count",
+                json.optInt("maker_count", json.optInt("makerCount", 1)),
+            ).coerceAtLeast(1)
+            SwapReportUiModel(
+                id = json.optString("swap_id", json.optString("swapId", fallbackId)),
+                status = status,
+                startTimestamp = json.optLong("start_timestamp", json.optLong("startTimestamp"))
+                    .takeIf { it > 0 },
+                durationSeconds = json.optDouble(
+                    "swap_duration_seconds",
+                    json.optDouble(
+                        "recovery_duration_seconds",
+                        json.optDouble("durationSeconds", 0.0),
+                    ),
+                ),
+                amountSats = json.optLong(
+                    "outgoing_amount",
+                    json.optLong("amountSats", json.optLong("incoming_amount")),
+                ),
+                outputSats = json.optLong("incoming_amount", json.optLong("outputSats")),
+                totalFeeSats = kotlin.math.abs(
+                    json.optLong("totalFeeSats", json.optLong("fee_paid")),
+                ),
+                makerCount = makers,
+                hops = json.optInt("hops", makers),
+                protocol = json.optString("protocol", "LEGACY").ifBlank { "LEGACY" },
+                errorMessage = json.optString("error_message", json.optString("errorMessage"))
+                    .takeIf { it.isNotBlank() }
+                    ?.let { simplifySwapError(it) },
+            )
+        }.getOrNull()
+
+    private fun simplifySwapError(raw: String): String {
+        val lower = raw.lowercase()
+        return when {
+            lower.contains("fill whole buffer") || lower.contains("unexpectedeof") ->
+                "Maker Tor connection dropped. Sync Markets, use 1 maker, retry."
+            lower.contains("tor") && lower.contains("connect") ->
+                "Tor connection failed"
+            lower.contains("timeout") ->
+                "Timed out waiting for maker"
+            else -> raw
+                .substringAfter("message: \"", raw)
+                .substringBefore("\"", raw)
+                .take(80)
+        }
     }
 
     private suspend fun <T> callFfi(operation: String, block: () -> T): Result<T> =
@@ -499,6 +590,25 @@ class CoinswapRepository(
                 // Serialize + lease so concurrent ViewModels cannot interleave UniFFI
                 // or close the Taker under an in-flight call.
                 TakerHolder.ffiMutex.withLock {
+                    Result.success(TakerHolder.withLeased(block))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
+                Result.failure(IllegalStateException("$operation failed: $detail", e))
+            }
+        }
+
+    /**
+     * Long Tor / network polls and coinswap execution. Uses [TakerHolder.longOpMutex]
+     * so long ops don't interleave with each other, without holding [ffiMutex] for
+     * the entire duration (which would freeze Home/History).
+     */
+    private suspend fun <T> callFfiLong(operation: String, block: () -> T): Result<T> =
+        withContext(Dispatchers.IO) {
+            try {
+                TakerHolder.longOpMutex.withLock {
                     Result.success(TakerHolder.withLeased(block))
                 }
             } catch (e: CancellationException) {

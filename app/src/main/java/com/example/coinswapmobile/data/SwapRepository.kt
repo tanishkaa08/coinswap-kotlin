@@ -71,7 +71,6 @@ class SwapRepository(
                 IllegalArgumentException("Select at least one coin for manual coin control"),
             )
         }
-        // Automatic mode: empty list → Rust picks coins. Manual mode: pass explicit outpoints.
         val enriched = selectedUtxos.map { u ->
             UtxoUiModel(
                 txid = u.txid,
@@ -111,8 +110,8 @@ class SwapRepository(
 
     private fun SwapReportUiModel.toScreenReport(): SwapReport {
         val mappedStatus = when (status) {
-            SwapReportUiModel.Status.FAILED,
-            SwapReportUiModel.Status.RECOVERED -> ReportStatus.FAILED
+            SwapReportUiModel.Status.FAILED -> ReportStatus.FAILED
+            SwapReportUiModel.Status.RECOVERED -> ReportStatus.FAILED // show under failed until UI has Recovered
             else -> ReportStatus.COMPLETED
         }
         val timeAgo = startTimestamp?.let {

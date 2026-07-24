@@ -25,7 +25,10 @@ data class TakerAppConfig(
 
     companion object {
         const val DEFAULT_RPC_HOST = "127.0.0.1"
-        const val DEFAULT_RPC_PORT = 18442
+        /** Signet default; use [REGTEST_RPC_PORT] for regtest. */
+        const val DEFAULT_RPC_PORT = 38332
+        const val SIGNET_RPC_PORT = 38332
+        const val REGTEST_RPC_PORT = 18442
         const val DEFAULT_RPC_USER = "user"
         const val DEFAULT_RPC_PASSWORD = "password"
         const val DEFAULT_ZMQ_HOST = "127.0.0.1"
@@ -39,6 +42,19 @@ data class TakerAppConfig(
         fun remoteHost(serverHost: String, walletPassword: String = "") = TakerAppConfig(
             rpcHost = serverHost.trim(),
             zmqHost = serverHost.trim(),
+            walletPassword = walletPassword,
+        )
+
+        fun forNetwork(
+            serverHost: String = DEFAULT_RPC_HOST,
+            rpcPort: Int,
+            zmqPort: Int = DEFAULT_ZMQ_PORT,
+            walletPassword: String = "",
+        ) = TakerAppConfig(
+            rpcHost = serverHost.trim(),
+            rpcPort = rpcPort,
+            zmqHost = serverHost.trim(),
+            zmqPort = zmqPort,
             walletPassword = walletPassword,
         )
     }

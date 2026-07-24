@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.SwapRepository
-import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,12 +40,7 @@ class SwapReportsViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, errorMessage = null) }
-            if (!TakerHolder.isInitialized) {
-                coinswapRepo.initTaker(session).onFailure { e ->
-                    _state.update { it.copy(isLoading = false, errorMessage = e.message) }
-                    return@launch
-                }
-            }
+            // Reports are on disk — do not require a live Taker/RPC.
             swapRepo.getSwapReports()
                 .onSuccess { reports ->
                     _state.update {
@@ -54,7 +48,7 @@ class SwapReportsViewModel(app: Application) : AndroidViewModel(app) {
                             isLoading = false,
                             reports = reports,
                             errorMessage = if (reports.isEmpty()) {
-                                "No swap reports yet. Completed swaps are saved under swap_reports/."
+                                "No swap reports yet."
                             } else {
                                 null
                             },

@@ -49,7 +49,6 @@ object TorManager {
                 socket.connect(InetSocketAddress(host, port), timeoutMs)
                 val out = DataOutputStream(socket.getOutputStream())
                 val inp = DataInputStream(socket.getInputStream())
-                // SOCKS5 greeting: VER=5, NMETHODS=1, METHOD=0 (no auth)
                 out.write(byteArrayOf(0x05, 0x01, 0x00))
                 out.flush()
                 val ver = inp.read()

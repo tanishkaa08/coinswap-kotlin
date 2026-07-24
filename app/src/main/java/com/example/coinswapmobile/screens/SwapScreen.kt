@@ -37,9 +37,8 @@ import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.ui.theme.*
+import com.example.coinswapmobile.service.SwapForegroundService
 import com.example.coinswapmobile.viewmodel.SwapViewModel
-
-// ── Data models ──────────────────────────────────────────────────────────────
 
 data class SwapMaker(
     val id: String,
@@ -65,15 +64,10 @@ data class SwapUtxo(
     val outpoint: String get() = "$txid:$vout"
 }
 
-/**
- * Regular (seed) coins and coins from a prior coinswap are separate pools.
- */
 enum class CoinPool { REGULAR, SWAP }
 
 fun SwapUtxo.pool(): CoinPool =
     if (spendType == null || spendType == "SeedCoin") CoinPool.REGULAR else CoinPool.SWAP
-
-// ── Network fee tiers ────────────────────────────────────────────────────────
 
 private enum class NetworkFee(
     val label: String,
@@ -85,14 +79,9 @@ private enum class NetworkFee(
     HIGH(  "High",   4, "4 sat/vB  •  10 min"),
 }
 
-// Taker-app uses 225 vbytes avg per funding tx, (hops + 1) total txs
 private const val TX_VBYTES = 225L
 
-// ── Swap state machine ───────────────────────────────────────────────────────
-
 private enum class SwapState { IDLE, CONFIRMING, IN_PROGRESS, DONE }
-
-// ── Screen ───────────────────────────────────────────────────────────────────
 
 @Composable
 fun SwapScreen(
@@ -120,7 +109,7 @@ fun SwapScreen(
     var txCountInput     by remember { mutableStateOf("1") }
     var networkFee       by remember { mutableStateOf(NetworkFee.MEDIUM) }
     var minFidelity      by remember { mutableStateOf("0") }
-    var feeRatePerHop    by remember { mutableStateOf("0.10") }
+    var feeRatePerHop    by remember { mutableStateOf("5.0") }
     var customOnion      by remember { mutableStateOf("") }
     var showMakerFilters by remember { mutableStateOf(false) }
 
@@ -147,6 +136,7 @@ fun SwapScreen(
         when {
             vmState.lastSwapId != null && !vmState.isSwapping && vmState.swapError == null ->
                 swapState = SwapState.DONE
+            !vmState.isSwapping && vmState.swapError != null && swapState == SwapState.IN_PROGRESS -> Unit
         }
     }
 
@@ -159,7 +149,7 @@ fun SwapScreen(
             it.feeRatePct <= feeRatePerHopPct &&
             (it.fidelityBondBtc * 100_000_000).toLong() >= minFidelitySats &&
             it.minSats <= amountSatsLong &&
-            it.maxSats >= amountSatsLong &&
+            (it.maxSats <= 0L || it.maxSats >= amountSatsLong) &&
             (customOnion.isBlank() || it.onionAddress.contains(customOnion, ignoreCase = true))
     }
     val selectedMakers   = eligibleMakers.take(makerCount)
@@ -177,7 +167,6 @@ fun SwapScreen(
     } else {
         feePerMakerSats * makerCount
     }
-    // (makers + 1) funding txs × 225 vbytes × sat/vB, scaled by tx splits.
     val fundingTxCount   = (makerCount + 1) * txCount
     val miningFeeSats    = networkFee.satPerVbyte * TX_VBYTES * fundingTxCount
     val totalFeeSats     = totalSwapFeeSats + miningFeeSats
@@ -199,7 +188,6 @@ fun SwapScreen(
             .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // ── Header ────────────────────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -255,7 +243,6 @@ fun SwapScreen(
         }
 
         SectionCard {
-            // Amount label (SectionLabel is a column; keep it out of this Row)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -285,7 +272,6 @@ fun SwapScreen(
             OutlinedTextField(
                 value = amountSats,
                 onValueChange = { amountSats = it.filter { c -> c.isDigit() } },
-                placeholder = { Text("e.g. 500000", color = TextSecondary) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -293,11 +279,10 @@ fun SwapScreen(
                 suffix = { Text("sats", color = TextSecondary) }
             )
             if (amountSatsLong > 0 && amountSatsLong < 100_000) {
-                WarningBox("Minimum swap amount is 100,000 sats")
+                WarningBox("Minimum 100,000 sats")
             }
         }
 
-        // Maker count with 5+ popup dialog
         var showMakerDialog by remember { mutableStateOf(false) }
         var customMakerInput by remember { mutableStateOf("") }
         val presetCounts = listOf(1, 2, 3, 4)
@@ -325,7 +310,6 @@ fun SwapScreen(
                         )
                     ) { Text("$n", style = MaterialTheme.typography.labelSmall) }
                 }
-                // 5+ opens popup
                 val customSel = isCustomSelected
                 Button(
                     onClick = { showMakerDialog = true },
@@ -341,7 +325,6 @@ fun SwapScreen(
             }
         }
 
-        // 5+ custom hop count dialog
         if (showMakerDialog) {
             AlertDialog(
                 onDismissRequest = { showMakerDialog = false },
@@ -352,20 +335,15 @@ fun SwapScreen(
                         color = TextPrimary)
                 },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter number of makers (1-20):",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary)
-                        OutlinedTextField(
-                            value = customMakerInput,
-                            onValueChange = { customMakerInput = it.filter { c -> c.isDigit() }.take(2) },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            colors = coinswapTextFieldColors(),
-                            suffix = { Text("makers", color = TextSecondary) }
-                        )
-                    }
+                    OutlinedTextField(
+                        value = customMakerInput,
+                        onValueChange = { customMakerInput = it.filter { c -> c.isDigit() }.take(2) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = coinswapTextFieldColors(),
+                        suffix = { Text("makers", color = TextSecondary) }
+                    )
                 },
                 confirmButton = {
                     Button(
@@ -430,24 +408,17 @@ fun SwapScreen(
             Text("MAX FEE PER MAKER",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
-            Row(
+            OutlinedTextField(
+                value = feeRatePerHop,
+                onValueChange = { feeRatePerHop = it },
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = feeRatePerHop,
-                    onValueChange = { feeRatePerHop = it },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    colors = coinswapTextFieldColors(),
-                    suffix = { Text("%", color = TextSecondary) },
-                    label = { Text("Max fee per maker", style = MaterialTheme.typography.labelSmall) }
-                )
-            }
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                colors = coinswapTextFieldColors(),
+                suffix = { Text("%", color = TextSecondary) }
+            )
 
-            Text("TRANSACTION SPLITS (tx_count)",
+            Text("TRANSACTION SPLITS",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
             OutlinedTextField(
@@ -457,8 +428,7 @@ fun SwapScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 colors = coinswapTextFieldColors(),
-                suffix = { Text("txs", color = TextSecondary) },
-                label = { Text("tx_count", style = MaterialTheme.typography.labelSmall) }
+                suffix = { Text("txs", color = TextSecondary) }
             )
 
             Text("MIN FIDELITY BOND",
@@ -471,24 +441,21 @@ fun SwapScreen(
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 colors = coinswapTextFieldColors(),
-                suffix = { Text("sats", color = TextSecondary) },
-                label = { Text("Min fidelity bond", style = MaterialTheme.typography.labelSmall) }
+                suffix = { Text("sats", color = TextSecondary) }
             )
 
-            Text("CUSTOM ONION ADDRESS",
+            Text("ONION ADDRESS",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
             OutlinedTextField(
                 value = customOnion,
                 onValueChange = { customOnion = it },
-                placeholder = { Text("Filter by maker onion address", color = TextSecondary) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = coinswapTextFieldColors()
             )
         }
 
-        // Coin control
         SectionCard {
             LabeledSwitch(
                 label    = "Choose specific coins",
@@ -502,14 +469,13 @@ fun SwapScreen(
             if (!useManualUtxos) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Available: ${formatSats(autoBestPool)} sats",
+                    "${formatSats(autoBestPool)} sats",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                 )
             } else {
                 Spacer(Modifier.height(10.dp))
 
-                // Regular and swap coins stay in separate pools.
                 if (regularUtxos.isNotEmpty() && swapUtxos.isNotEmpty()) {
                     Text("COIN POOL",
                         style = MaterialTheme.typography.labelSmall,
@@ -531,11 +497,6 @@ fun SwapScreen(
                             onClick  = { coinPool = CoinPool.SWAP; selectedOutpoints = emptySet() },
                         )
                     }
-                    Text(
-                        "Cannot mix regular and swap coins.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                    )
                     Spacer(Modifier.height(8.dp))
                 }
 
@@ -591,16 +552,16 @@ fun SwapScreen(
             && fundsOk
 
         val validationMessage: String? = when {
-            amountSatsLong <= 0 -> "Enter an amount to swap"
-            amountSatsLong < 100_000 -> "Amount too low; minimum is 100,000 sats"
+            amountSatsLong <= 0 -> "Enter an amount"
+            amountSatsLong < 100_000 -> "Minimum 100,000 sats"
             eligibleMakers.size < makerCount ->
-                "Not enough eligible makers (${eligibleMakers.size}/${makerCount}); relax fee filter"
+                "Not enough makers (${eligibleMakers.size}/${makerCount})"
             useManualUtxos && manualSelected.isEmpty() ->
                 "Select at least one coin"
             useManualUtxos && manualTotal < amountSatsLong ->
-                "Selected coins (${formatSats(manualTotal)} sats) < swap amount"
+                "Selected coins below swap amount"
             !useManualUtxos && autoBestPool < amountSatsLong ->
-                "Not enough spendable coins in one pool"
+                "Insufficient funds"
             else -> null
         }
 
@@ -625,14 +586,13 @@ fun SwapScreen(
 
         Button(
             onClick = {
-                // adb reverse to PC Tor works without Orbot; only prompt when SOCKS is down.
                 if (!vmState.torReachable) {
                     if (OrbotHelper.isOrbotInstalled(context)) {
                         OrbotHelper.openOrbotApp(context)
                     } else {
                         showOrbotDialog = true
-                        return@Button
                     }
+                    return@Button
                 }
                 if (canSwap) swapState = SwapState.CONFIRMING
             },
@@ -655,7 +615,6 @@ fun SwapScreen(
         Spacer(Modifier.height(16.dp))
     }
 
-    // ── Confirmation dialog ───────────────────────────────────────────────────
     if (swapState == SwapState.CONFIRMING) {
         SwapConfirmDialog(
             amountSats    = amountSatsLong,
@@ -681,7 +640,6 @@ fun SwapScreen(
         )
     }
 
-    // ── In-progress overlay ───────────────────────────────────────────────────
     if (swapState == SwapState.IN_PROGRESS || swapState == SwapState.DONE) {
         SwapProgressOverlay(
             makerCount    = makerCount,
@@ -691,8 +649,18 @@ fun SwapScreen(
             swapPhase     = vmState.swapPhase,
             swapError     = vmState.swapError,
             onClose       = {
+                SwapForegroundService.stop(context.applicationContext)
                 swapState = SwapState.IDLE
                 swapViewModel.clearSwapResult()
+            },
+            onRecover     = {
+                SwapForegroundService.stop(context.applicationContext)
+                swapState = SwapState.IDLE
+                swapViewModel.clearSwapResult()
+                onSwapFailed()
+            },
+            onStopSwap    = {
+                SwapForegroundService.stop(context.applicationContext)
             },
             onViewReport  = {
                 swapState = SwapState.IDLE
@@ -702,8 +670,6 @@ fun SwapScreen(
         )
     }
 }
-
-// ── Sub-composables ──────────────────────────────────────────────────────────
 
 @Composable
 private fun UtxoListRow(utxo: SwapUtxo, onToggle: () -> Unit) {
@@ -763,7 +729,6 @@ private fun SwapSummaryCard(
             style = MaterialTheme.typography.labelSmall,
             color = TextSecondary)
         Spacer(Modifier.height(4.dp))
-        // Estimated time chip
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
@@ -779,7 +744,6 @@ private fun SwapSummaryCard(
         SummaryRow("Makers",             "$makerCount")
         if (txCount > 1) SummaryRow("Transaction splits", "$txCount")
         SummaryRow("Funding transactions","$fundingTxCount")
-        SummaryRow("Avg funding TX size", "${TX_VBYTES} vB")
         HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 6.dp))
         SummaryRow("Est. maker fee",     "${formatSats(feePerMakerSats * makerCount)} sats")
         SummaryRow("Est. network fee",   "${formatSats(miningFeeSats)} sats  ($networkFeeRate sat/vB)")
@@ -885,8 +849,6 @@ private fun WarningBox(message: String) {
 
 private fun formatSats(sats: Long): String = "%,d".format(sats)
 
-// ── Confirmation dialog ──────────────────────────────────────────────────────
-
 @Composable
 private fun SwapConfirmDialog(
     amountSats: Long,
@@ -952,8 +914,6 @@ private fun ConfirmRow(label: String, value: String, highlight: Boolean = false)
     }
 }
 
-// ── In-progress overlay ──────────────────────────────────────────────────────
-
 private enum class SwapStage { PREPARING, SWAPPING, DONE, FAILED }
 
 private fun swapStageOf(
@@ -964,8 +924,12 @@ private fun swapStageOf(
 ): SwapStage = when {
     finished -> SwapStage.DONE
     failed -> SwapStage.FAILED
-    phase != null && phase.contains("Executing", ignoreCase = true) -> SwapStage.SWAPPING
-    else -> SwapStage.PREPARING
+    !isSwapping -> SwapStage.PREPARING
+    phase != null && (
+        phase.contains("Syncing", ignoreCase = true) ||
+            phase.contains("Preparing", ignoreCase = true)
+        ) -> SwapStage.PREPARING
+    else -> SwapStage.SWAPPING
 }
 
 @Composable
@@ -977,6 +941,8 @@ private fun SwapProgressOverlay(
     swapPhase: String?,
     swapError: String?,
     onClose: () -> Unit,
+    onStopSwap: () -> Unit = {},
+    onRecover: () -> Unit = {},
     onViewReport: () -> Unit
 ) {
     val finished = swapFinished
@@ -988,7 +954,6 @@ private fun SwapProgressOverlay(
             .fillMaxSize()
             .background(Background.copy(alpha = 0.97f))
     ) {
-        // Top bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1011,7 +976,6 @@ private fun SwapProgressOverlay(
                 })
         }
 
-        // Main content
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1037,7 +1001,7 @@ private fun SwapProgressOverlay(
                 Text(if (stage == SwapStage.PREPARING) "Preparing Swap" else "Swap in Progress",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary)
-                Text("${formatSats(amountSats)} sats routing through $makerCount makers",
+                Text("${formatSats(amountSats)} sats · $makerCount makers",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     textAlign = TextAlign.Center)
@@ -1047,21 +1011,27 @@ private fun SwapProgressOverlay(
                         color = TextSecondary,
                         textAlign = TextAlign.Center)
                 }
-                if (stage == SwapStage.SWAPPING) {
-                    Text(
-                        "Broadcasting funding and waiting for confirmations. Keep the app open.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center,
-                    )
-                }
             }
 
-            // wallet -> makers -> wallet
             SwapRingVisualization(
                 makerCount = makerCount,
                 stage      = stage
             )
+
+            if (!finished && !failed && (isSwapping || stage == SwapStage.PREPARING)) {
+                OutlinedButton(
+                    onClick  = onStopSwap,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape    = RoundedCornerShape(12.dp),
+                    border   = androidx.compose.foundation.BorderStroke(1.dp, TorInactive)
+                ) {
+                    Text(
+                        "Stop swap",
+                        color = TorInactive,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
 
             if (finished) {
                 Column(
@@ -1090,15 +1060,32 @@ private fun SwapProgressOverlay(
                     }
                 }
             } else if (failed) {
-                OutlinedButton(
-                    onClick  = onClose,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape    = RoundedCornerShape(12.dp),
-                    border   = androidx.compose.foundation.BorderStroke(1.dp, Divider)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Close",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.titleMedium)
+                    Button(
+                        onClick = onRecover,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentAmber),
+                    ) {
+                        Text(
+                            "Open Recovery",
+                            color = androidx.compose.ui.graphics.Color.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick  = onClose,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        border   = androidx.compose.foundation.BorderStroke(1.dp, Divider)
+                    ) {
+                        Text("Close",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.titleMedium)
+                    }
                 }
             }
         }
@@ -1120,17 +1107,15 @@ private fun SwapRingVisualization(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        // Wallet out (after funding broadcast)
         val sendDone = swapping || finished
         StepNode(
             label  = "YOUR WALLET",
-            sub    = if (sendDone) "Funds sent" else "Preparing…",
+            sub    = if (sendDone) "Sent" else "Preparing…",
             done   = sendDone,
             active = stage == SwapStage.PREPARING,
             color  = if (sendDone) TorActive else AccentPurple
         )
 
-        // Makers (relaying while swap runs)
         for (hop in 1..makerCount) {
             val done   = finished
             val active = swapping
@@ -1138,7 +1123,7 @@ private fun SwapRingVisualization(
             StepNode(
                 label  = "MAKER %02d".format(hop),
                 sub    = when {
-                    done   -> "Complete"
+                    done   -> "Done"
                     active -> "Relaying…"
                     else   -> "Waiting"
                 },
@@ -1152,14 +1137,13 @@ private fun SwapRingVisualization(
             )
         }
 
-        // Wallet receive (settlement)
         StepConnector(done = finished)
         StepNode(
             label  = "YOUR WALLET",
             sub    = when {
                 finished -> "Received"
-                swapping -> "Settling (confirmations)…"
-                else     -> "Awaiting"
+                swapping -> "Settling…"
+                else     -> "Waiting"
             },
             done   = finished,
             active = swapping,

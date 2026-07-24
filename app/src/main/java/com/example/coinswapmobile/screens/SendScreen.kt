@@ -87,7 +87,7 @@ fun SendScreen(
             OutlinedTextField(
                 value           = amountSats,
                 onValueChange   = { amountSats = it.filter { c -> c.isDigit() } },
-                placeholder     = { Text("e.g. 500000", color = TextSecondary) },
+                placeholder     = { Text("Amount", color = TextSecondary) },
                 modifier        = Modifier.fillMaxWidth(),
                 singleLine      = true,
                 enabled         = sendEnabled,

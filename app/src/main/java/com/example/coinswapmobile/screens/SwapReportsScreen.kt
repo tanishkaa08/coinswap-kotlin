@@ -29,8 +29,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.coinswapmobile.ui.theme.*
 
-// ── Models ────────────────────────────────────────────────────────────────────
-
 enum class ReportStatus { COMPLETED, FAILED }
 
 data class SwapReport(
@@ -46,8 +44,6 @@ data class SwapReport(
     val outputSats:    Long,
     val errorMessage:  String? = null
 )
-
-// ── Screen ────────────────────────────────────────────────────────────────────
 
 @Composable
 fun SwapReportsScreen(
@@ -68,7 +64,6 @@ fun SwapReportsScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -89,8 +84,6 @@ fun SwapReportsScreen(
                 }
             }
         }
-
-        // Stats grid
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -115,8 +108,6 @@ fun SwapReportsScreen(
         }
 
         Spacer(Modifier.height(12.dp))
-
-        // Swap list
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
@@ -180,7 +171,6 @@ private fun SwapReportRow(report: SwapReport) {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Top row: ID + expand toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -206,21 +196,18 @@ private fun SwapReportRow(report: SwapReport) {
                 color = TextSecondary)
         }
 
-        // Badges row
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatusBadge(report.status)
             Badge("${report.makerCount} MAKERS", TorActive)
             Badge(report.protocol, AccentPurple)
         }
 
-        // Error message
         if (isFailed && report.errorMessage != null) {
             Text(report.errorMessage,
                 style = MaterialTheme.typography.labelSmall,
                 color = AccentAmber)
         }
 
-        // Details revealed on tap
         AnimatedVisibility(visible = expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 HorizontalDivider(color = Divider)

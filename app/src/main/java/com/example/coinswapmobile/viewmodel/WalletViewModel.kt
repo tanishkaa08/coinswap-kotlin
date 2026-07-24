@@ -70,7 +70,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Initialize / reconnect UniFFI Taker (RPC+ZMQ+Tor). Tor SOCKS is soft-checked only. */
-    fun connectWallet() {
+    fun connectWallet(forceReconnect: Boolean = false) {
         if (!session.isLoggedIn) return
         connectJob?.cancel()
         connectJob = viewModelScope.launch {
@@ -90,7 +90,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             // Wallet RPC works without Tor; warn but still init (markets/swaps need Tor later).
-            repo.initTaker(session)
+            repo.initTaker(session, forceReconnect = forceReconnect)
                 .onSuccess { state ->
                     _uiState.update {
                         it.applyState(state, cfg.rpcUrl, cfg.walletName, cfg.zmqAddr)

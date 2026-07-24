@@ -36,8 +36,6 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     var selectedMaker by remember { mutableStateOf<SwapMaker?>(null) }
     var showOrbotDialog by remember { mutableStateOf(false) }
     val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    // Auto-sync makers while this screen is visible; stop when it isn't.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -65,10 +63,9 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     }
 
     fun syncWithOrbotCheck() {
-        // adb reverse to PC Tor works without Orbot; only prompt when SOCKS is down.
         if (!vmState.torReachable) {
             promptOrbotOrOpen()
-            if (!OrbotHelper.isOrbotInstalled(context)) return
+            return
         }
         marketsViewModel.syncMarketplace()
     }
@@ -90,7 +87,6 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // ── Header ──────────────────────────────────────────────────────────
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -113,33 +109,39 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
                 OrbotPromptBanner(onInstallClick = { promptOrbotOrOpen() })
             }
         }
-
-        // ── Sync button ─────────────────────────────────────────────────────
         item {
-            Button(
-                onClick = { syncWithOrbotCheck() },
-                enabled  = !isSyncing,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape    = RoundedCornerShape(12.dp),
-                colors   = ButtonDefaults.buttonColors(containerColor = TorActive)
-            ) {
-                if (isSyncing) {
-                    CircularProgressIndicator(
-                        modifier    = Modifier.size(18.dp),
-                        color       = androidx.compose.ui.graphics.Color.Black,
-                        strokeWidth = 2.dp
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { syncWithOrbotCheck() },
+                    enabled  = !isSyncing,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape    = RoundedCornerShape(12.dp),
+                    colors   = ButtonDefaults.buttonColors(containerColor = TorActive)
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier    = Modifier.size(18.dp),
+                            color       = androidx.compose.ui.graphics.Color.Black,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Syncing…", color = androidx.compose.ui.graphics.Color.Black,
+                            style = MaterialTheme.typography.titleMedium)
+                    } else {
+                        Text("Sync Marketplace", color = androidx.compose.ui.graphics.Color.Black,
+                            style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                vmState.syncStatus?.let { status ->
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(top = 8.dp),
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Syncing…", color = androidx.compose.ui.graphics.Color.Black,
-                        style = MaterialTheme.typography.titleMedium)
-                } else {
-                    Text("Sync Marketplace", color = androidx.compose.ui.graphics.Color.Black,
-                        style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
-
-        // ── Column headers (MAKER + FEE only) ───────────────────────────────
         item {
             Row(
                 modifier = Modifier
@@ -157,13 +159,11 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
             }
             HorizontalDivider(color = Divider, modifier = Modifier.padding(top = 6.dp))
         }
-
-        // ── Maker rows ──────────────────────────────────────────────────────
         if (makers.isEmpty()) {
             item {
                 val message = vmState.errorMessage
                     ?: if (!vmState.torReachable) vmState.torStatusMessage else null
-                    ?: "No makers loaded. Sync the marketplace."
+                    ?: "No makers loaded."
                 Text(
                     message,
                     style = MaterialTheme.typography.labelSmall,
@@ -180,8 +180,6 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     }
 }
 
-// ── Compact list row (MAKER + FEE) ───────────────────────────────────────────
-
 @Composable
 private fun MakerRow(maker: SwapMaker, onClick: () -> Unit) {
     Row(
@@ -193,7 +191,6 @@ private fun MakerRow(maker: SwapMaker, onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Status dot + ID
         Row(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
@@ -213,8 +210,6 @@ private fun MakerRow(maker: SwapMaker, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis
             )
         }
-
-        // Fee badge
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
@@ -231,8 +226,6 @@ private fun MakerRow(maker: SwapMaker, onClick: () -> Unit) {
     }
 }
 
-// ── Full detail bottom sheet ──────────────────────────────────────────────────
-
 @Composable
 private fun MakerDetailSheet(maker: SwapMaker, onDismiss: () -> Unit) {
     Column(
@@ -242,7 +235,6 @@ private fun MakerDetailSheet(maker: SwapMaker, onDismiss: () -> Unit) {
             .padding(top = 8.dp, bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
-        // Status header
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -267,8 +259,6 @@ private fun MakerDetailSheet(maker: SwapMaker, onDismiss: () -> Unit) {
             color = TextPrimary)
 
         Spacer(Modifier.height(16.dp))
-
-        // Detail rows
         SheetDetailRow("Maker ID",       maker.id)
         SheetDetailRow("Fee per maker",  "${maker.feeRatePct}%")
         SheetDetailRow("Min swap",       "%,d sats".format(maker.minSats))

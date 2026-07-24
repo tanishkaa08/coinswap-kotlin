@@ -62,7 +62,6 @@ import com.example.coinswapmobile.ui.theme.TorActive
 import com.example.coinswapmobile.ui.theme.TorInactive
 import kotlinx.coroutines.launch
 
-/** First-time setup: Bitcoin Core RPC, ZMQ, Tor ports, wallet password. */
 @Composable
 fun LoginScreen(onConnected: () -> Unit) {
     val context = LocalContext.current
@@ -80,7 +79,14 @@ fun LoginScreen(onConnected: () -> Unit) {
             }
         )
     }
-    var rpcPort by remember { mutableStateOf(initial.rpcPort.toString()) }
+    var rpcPort by remember {
+        mutableStateOf(
+            when {
+                demoHost.isNotBlank() -> TakerAppConfig.REGTEST_RPC_PORT.toString()
+                else -> initial.rpcPort.toString()
+            }
+        )
+    }
     var rpcUser by remember { mutableStateOf(initial.rpcUsername) }
     var rpcPass by remember { mutableStateOf(initial.rpcPassword) }
     var zmqHost by remember {
@@ -129,7 +135,6 @@ fun LoginScreen(onConnected: () -> Unit) {
             zmqHost = zmqHost.trim(),
             zmqPort = zPort,
             torControlPort = cPort,
-            // UniFFI hardcodes SOCKS 127.0.0.1:9050 — always persist that.
             torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
             torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
             torAuthPassword = torAuth,
@@ -137,10 +142,9 @@ fun LoginScreen(onConnected: () -> Unit) {
             walletPassword = walletPassword,
             protocol = session.config.protocol,
         )
-        // Persist settings but stay logged out until Taker.init succeeds.
         session.saveConfig(cfg, markLoggedIn = false)
         scope.launch {
-            val result = repo.initTaker(session)
+            val result = repo.initTaker(session, forceReconnect = true)
             connecting = false
             result
                 .onSuccess {
@@ -193,6 +197,33 @@ fun LoginScreen(onConnected: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("Bitcoin Core RPC", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            rpcPort = TakerAppConfig.SIGNET_RPC_PORT.toString()
+                            zmqPort = TakerAppConfig.DEFAULT_ZMQ_PORT.toString()
+                        },
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Surface),
+                    ) {
+                        Text("Signet ports", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
+                    }
+                    Button(
+                        onClick = {
+                            rpcPort = TakerAppConfig.REGTEST_RPC_PORT.toString()
+                            zmqPort = TakerAppConfig.DEFAULT_ZMQ_PORT.toString()
+                        },
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Surface),
+                    ) {
+                        Text("Regtest ports", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 Field("RPC host", rpcHost, { rpcHost = it }, KeyboardType.Uri)
                 Field("RPC port", rpcPort, { rpcPort = it.filter(Char::isDigit) }, KeyboardType.Number)
                 Field("RPC username", rpcUser, { rpcUser = it })
