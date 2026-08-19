@@ -20,11 +20,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.coinswapmobile.components.OrbotHelper
-import com.example.coinswapmobile.components.OrbotInstallDialog
-import com.example.coinswapmobile.components.OrbotPromptBanner
+import com.example.coinswapmobile.components.TorPromptBanner
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.MarketsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,7 +34,7 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
     val makers       = vmState.makers
     val isSyncing    = vmState.isSyncing
     var selectedMaker by remember { mutableStateOf<SwapMaker?>(null) }
-    var showOrbotDialog by remember { mutableStateOf(false) }
+    val scope        = rememberCoroutineScope()
     val sheetState   = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -52,22 +52,12 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         }
     }
 
-    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
-
-    fun promptOrbotOrOpen() {
-        if (OrbotHelper.isOrbotInstalled(context)) {
-            OrbotHelper.openOrbotApp(context)
-        } else {
-            showOrbotDialog = true
+    fun retryTorThenSync() {
+        scope.launch {
+            TorManager.ensureRunning(context)
+            marketsViewModel.refreshTorStatus()
+            marketsViewModel.syncMarketplace()
         }
-    }
-
-    fun syncWithOrbotCheck() {
-        if (!vmState.torReachable) {
-            promptOrbotOrOpen()
-            return
-        }
-        marketsViewModel.syncMarketplace()
     }
 
     if (selectedMaker != null) {
@@ -106,13 +96,13 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
 
         if (!vmState.torReachable) {
             item {
-                OrbotPromptBanner(onInstallClick = { promptOrbotOrOpen() })
+                TorPromptBanner(onRetryClick = { retryTorThenSync() })
             }
         }
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = { syncWithOrbotCheck() },
+                    onClick = { retryTorThenSync() },
                     enabled  = !isSyncing,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape    = RoundedCornerShape(12.dp),

@@ -36,6 +36,7 @@ private const val SEND_TX_VBYTES = 225L
 @Composable
 fun SendScreen(
     onBack: () -> Unit,
+    showHeader: Boolean = true,
     sendViewModel: SendViewModel = viewModel(),
 ) {
     val vmState by sendViewModel.uiState.collectAsState()
@@ -56,13 +57,15 @@ fun SendScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
+        if (showHeader) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
+                }
+                Text("Send",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary)
             }
-            Text("Send",
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary)
         }
 
         vmState.error?.let { err ->

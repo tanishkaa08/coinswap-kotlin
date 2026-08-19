@@ -5,7 +5,7 @@ data class WalletState(
     val balanceSats: Long,
     val confirmedSats: Long,
     val unconfirmedSats: Long,
-    val backend: String = "BITCOIN_CORE_RPC",
+    val backend: String = "ELECTRUM",
     val network: String? = null,
     val lastSyncUnix: Long? = null,
     val blockHeight: Long? = null,
@@ -40,7 +40,7 @@ data class NativeCapabilities(
     val reports: Boolean = false,
     val recovery: Boolean = false,
     val missingApis: List<String> = emptyList(),
-    val backend: String = "BITCOIN_CORE_RPC",
+    val backend: String = "ELECTRUM",
 )
 
 data class TxUiModel(

@@ -11,6 +11,7 @@ import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.model.WalletState
+import com.example.coinswapmobile.service.SwapExecutionBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +23,6 @@ data class WalletUiState(
     val isInitialized: Boolean = false,
     val rpcLabel: String = "",
     val walletName: String = "",
-    val zmqLabel: String = "",
     val backendLabel: String = "",
     val libraryLoadStatus: String = "",
     val capabilities: NativeCapabilities? = null,
@@ -50,7 +50,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             walletName = session.walletName,
             libraryLoadStatus = repo.libraryLoadStatus,
             capabilities = repo.getCapabilities(),
-            backendLabel = session.config.rpcUrl,
+            backendLabel = "Auto backend configured",
             isInitialized = TakerHolder.isInitialized,
         )
     )
@@ -69,31 +69,31 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Initialize / reconnect UniFFI Taker (RPC+ZMQ+Tor). Tor SOCKS is soft-checked only. */
+    /** Initialize / reconnect the wallet session. Tor SOCKS is soft-checked only. */
     fun connectWallet(forceReconnect: Boolean = false) {
         if (!session.isLoggedIn) return
+        if (SwapExecutionBus.active.value) return
         connectJob?.cancel()
         connectJob = viewModelScope.launch {
             val cfg = session.config
-            val tor = TorManager.checkSocks()
+            val tor = TorManager.ensureRunning(getApplication())
             _uiState.update {
                 it.copy(
                     isLoading = true,
                     error = null,
                     walletName = cfg.walletName,
-                    rpcLabel = cfg.rpcUrl,
-                    zmqLabel = cfg.zmqAddr,
+                    rpcLabel = cfg.electrumUrl,
                     libraryLoadStatus = repo.libraryLoadStatus,
                     capabilities = repo.getCapabilities(),
                     torReachable = tor.reachable,
                     torStatusMessage = tor.message,
                 )
             }
-            // Wallet RPC works without Tor; warn but still init (markets/swaps need Tor later).
+            // Wallet connect works without Tor; warn but still init (markets/swaps need Tor later).
             repo.initTaker(session, forceReconnect = forceReconnect)
                 .onSuccess { state ->
                     _uiState.update {
-                        it.applyState(state, cfg.rpcUrl, cfg.walletName, cfg.zmqAddr)
+                        it.applyState(state, cfg.electrumUrl, cfg.walletName)
                             .copy(
                                 isLoading = false,
                                 isInitialized = true,
@@ -115,7 +115,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshTorStatus() {
         viewModelScope.launch {
-            val tor = TorManager.checkSocks()
+            val tor = TorManager.ensureRunning(getApplication())
             _uiState.update {
                 it.copy(torReachable = tor.reachable, torStatusMessage = tor.message)
             }
@@ -132,6 +132,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     fun syncWallet() {
         if (!session.isLoggedIn) return
+        if (SwapExecutionBus.active.value) return
         if (!TakerHolder.isInitialized) {
             connectWallet()
             return
@@ -143,7 +144,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
             repo.syncWallet()
                 .onSuccess { state ->
                     _uiState.update {
-                        it.applyState(state, cfg.rpcUrl, cfg.walletName, cfg.zmqAddr)
+                        it.applyState(state, cfg.electrumUrl, cfg.walletName)
                             .copy(isLoading = false, isInitialized = true, error = null)
                     }
                 }
@@ -154,6 +155,10 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
     fun generateReceiveAddress(addrType: String = "P2WPKH") {
         if (!session.isLoggedIn || !TakerHolder.isInitialized) {
             _uiState.update { it.copy(error = "Initialize the taker wallet first.") }
+            return
+        }
+        if (SwapExecutionBus.active.value) {
+            _uiState.update { it.copy(error = "Wait for the coinswap to finish") }
             return
         }
         viewModelScope.launch {
@@ -170,9 +175,8 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun WalletUiState.applyState(
         state: WalletState,
-        rpcUrl: String,
+        electrumUrl: String,
         walletName: String,
-        zmqAddr: String,
     ): WalletUiState = copy(
         balanceSats = state.balanceSats,
         confirmedSats = state.confirmedSats,
@@ -181,10 +185,9 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         swapSats = state.swapSats,
         contractSats = state.contractSats,
         fidelitySats = state.fidelitySats,
-        rpcLabel = rpcUrl,
+        rpcLabel = electrumUrl,
         walletName = walletName,
-        zmqLabel = zmqAddr,
-        backendLabel = "Bitcoin Core RPC • $rpcUrl • ZMQ $zmqAddr",
+        backendLabel = "Electrum • $electrumUrl",
         utxos = state.utxos,
         libraryLoadStatus = repo.libraryLoadStatus,
     )

@@ -10,6 +10,7 @@ import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.model.NativeCapabilities
 import com.example.coinswapmobile.model.SwapReportUiModel
 import com.example.coinswapmobile.model.TxUiModel
+import com.example.coinswapmobile.service.SwapExecutionBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +76,19 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
                     swaps = swaps,
                     errorMessage = swapsError,
                 )
+            }
+
+            if (SwapExecutionBus.active.value) {
+                _state.update {
+                    it.copy(
+                        isLoadingTxs = false,
+                        errorMessage = listOfNotNull(
+                            "On-chain history paused while a swap is running",
+                            swapsError,
+                        ).joinToString(" • "),
+                    )
+                }
+                return@launch
             }
 
             if (!TakerHolder.isInitialized) {

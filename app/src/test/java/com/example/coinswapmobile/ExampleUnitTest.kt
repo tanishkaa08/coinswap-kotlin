@@ -15,22 +15,17 @@ class WalletContractTest {
     @Test
     fun takerAppConfig_serializesConnectionMetadata() {
         val cfg = TakerAppConfig(
-            rpcHost = "10.0.0.2",
-            rpcPort = 18443,
-            rpcUsername = "alice",
-            rpcPassword = "secret",
-            zmqHost = "10.0.0.2",
-            zmqPort = 28333,
+            electrumUrl = "tcp://10.0.0.2:50001",
             walletName = "demo-wallet",
             walletPassword = "wp",
             torAuthPassword = "tor-pass",
         )
-        assertEquals("10.0.0.2:18443", cfg.rpcUrl)
-        assertEquals("tcp://10.0.0.2:28333", cfg.zmqAddr)
+        assertEquals("tcp://10.0.0.2:50001", cfg.electrumUrl)
+        assertEquals(null, cfg.electrumSocks5)
         assertEquals("demo-wallet", cfg.walletName)
-        // Round-trip via copy preserves secrets for session save/load contracts.
+        val onion = cfg.copy(electrumUrl = "tcp://abcd.onion:50001")
+        assertEquals("127.0.0.1:9050", onion.electrumSocks5)
         val copy = cfg.copy()
-        assertEquals(cfg.rpcPassword, copy.rpcPassword)
         assertEquals(cfg.walletPassword, copy.walletPassword)
         assertEquals(cfg.torAuthPassword, copy.torAuthPassword)
     }
@@ -59,10 +54,78 @@ class WalletContractTest {
     fun clearSessionContract_wipesCredentialKeys() {
         // Logout must wipe credential keys (see UserSession.clearSession), not only logged_in=false.
         val clearedKeys = setOf(
+            "electrum_url",
             "rpc_host", "rpc_port", "rpc_user", "rpc_password",
             "zmq_host", "zmq_port", "tor_control", "socks_host", "socks_port",
             "tor_auth", "wallet_name", "wallet_password", "protocol",
         )
-        assertTrue(clearedKeys.containsAll(listOf("rpc_password", "wallet_password", "tor_auth")))
+        assertTrue(clearedKeys.containsAll(listOf("electrum_url", "wallet_password", "tor_auth")))
+    }
+
+    @Test
+    fun electrumUrlForHost_addsSchemeAndPort() {
+        assertEquals("tcp://10.0.0.2:50001", TakerAppConfig.electrumUrlForHost("10.0.0.2"))
+        assertEquals(
+            "ssl://electrum.example:50002",
+            TakerAppConfig.electrumUrlForHost("ssl://electrum.example:50002"),
+        )
+    }
+
+    @Test
+    fun useMax_keepsPrepareFeeReserve() {
+        assertEquals(90_000L, CoinswapRepository.maxSwappableSats(100_000L))
+        assertEquals(0L, CoinswapRepository.maxSwappableSats(5_000L))
+        assertTrue(CoinswapRepository.poolCanFundSwap(210_000L, 200_000L))
+        assertFalse(CoinswapRepository.poolCanFundSwap(200_000L, 200_000L))
+        assertFalse(CoinswapRepository.poolCanFundSwap(209_999L, 200_000L))
+    }
+
+    @Test
+    fun makerFitsAmount_requiresOnlineMinMaxAndLiquidity() {
+        assertTrue(
+            CoinswapRepository.makerFitsAmount(
+                online = true,
+                minSats = 100_000,
+                maxSats = 1_000_000,
+                liquiditySats = 500_000,
+                amountSats = 200_000,
+            ),
+        )
+        assertFalse(
+            CoinswapRepository.makerFitsAmount(
+                online = false,
+                minSats = 100_000,
+                maxSats = 1_000_000,
+                liquiditySats = 500_000,
+                amountSats = 200_000,
+            ),
+        )
+        assertFalse(
+            CoinswapRepository.makerFitsAmount(
+                online = true,
+                minSats = 100_000,
+                maxSats = 150_000,
+                liquiditySats = 500_000,
+                amountSats = 200_000,
+            ),
+        )
+        assertFalse(
+            CoinswapRepository.makerFitsAmount(
+                online = true,
+                minSats = 100_000,
+                maxSats = 1_000_000,
+                liquiditySats = 150_000,
+                amountSats = 200_000,
+            ),
+        )
+        assertTrue(
+            CoinswapRepository.makerFitsAmount(
+                online = true,
+                minSats = 100_000,
+                maxSats = 0,
+                liquiditySats = 0,
+                amountSats = 200_000,
+            ),
+        )
     }
 }

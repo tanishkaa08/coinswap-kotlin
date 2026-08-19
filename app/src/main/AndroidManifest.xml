@@ -13,6 +13,7 @@
     </queries>
 
     <application
+        android:name=".CoinSwapApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -39,6 +40,10 @@
             android:name=".service.SwapForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="org.torproject.jni.TorService"
+            android:exported="false" />
     </application>
 
 </manifest>

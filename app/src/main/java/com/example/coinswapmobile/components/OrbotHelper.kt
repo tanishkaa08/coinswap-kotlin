@@ -91,9 +91,9 @@ fun OrbotInstallDialog(
 }
 
 @Composable
-fun OrbotPromptBanner(
+fun TorPromptBanner(
     modifier: Modifier = Modifier,
-    onInstallClick: () -> Unit,
+    onRetryClick: () -> Unit,
 ) {
     Text(
         "Tor unreachable",
@@ -102,7 +102,7 @@ fun OrbotPromptBanner(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onInstallClick)
+            .clickable(onClick = onRetryClick)
             .padding(10.dp),
     )
 }

@@ -24,9 +24,8 @@ import com.example.coinswapmobile.screens.SettingsScreen
 import com.example.coinswapmobile.screens.SwapRecovery
 import com.example.coinswapmobile.screens.SwapScreen
 import com.example.coinswapmobile.screens.SwapReportsScreen
+import com.example.coinswapmobile.screens.TransactScreen
 import com.example.coinswapmobile.screens.WalletHistoryScreen
-import com.example.coinswapmobile.screens.SendScreen
-import com.example.coinswapmobile.screens.ReceiveScreen
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.Background
@@ -47,7 +46,7 @@ private val bottomNavItems = listOf(
     Screen.Home, Screen.Markets, Screen.Swap, Screen.History, Screen.Settings
 )
 
-private val routesWithoutBottomBar = setOf("login", "recovery", "send", "receive", "swap_reports")
+private val routesWithoutBottomBar = setOf("login", "recovery", "transact", "swap_reports")
 
 private fun resolveStartRoute(context: android.content.Context): String {
     if (!UserSession.isLoggedIn(context)) return Screen.Login.route
@@ -130,12 +129,16 @@ fun CoinSwapNavGraph() {
             }
             composable(Screen.Home.route) {
                 HomeScreen(
-                    onSendClick    = { navController.navigate("send") },
-                    onReceiveClick = { navController.navigate("receive") }
+                    onTransactClick = { navController.navigate("transact") },
                 )
             }
-            composable("send")    { SendScreen(onBack = { navController.popBackStack() }) }
-            composable("receive") { ReceiveScreen(onBack = { navController.popBackStack() }) }
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onLogout = { logout() },
+                )
+            }
+            composable("transact") { TransactScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.Markets.route)  { MarketsScreen() }
             composable(Screen.Swap.route) {
                 // Activity-scoped so an in-flight swap survives tab switches.
@@ -156,25 +159,17 @@ fun CoinSwapNavGraph() {
             composable("swap_reports") {
                 SwapReportsScreen(onBack = { navController.popBackStack() })
             }
-            composable(Screen.Settings.route) {
-                SettingsScreen(
-                    onOpenRecovery = { goToRecovery() },
-                    onLogout       = { logout() },
-                )
-            }
             composable("recovery") {
+                fun leaveRecovery() {
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo("recovery") { inclusive = true }
+                    }
+                }
                 RecoveryScreen(
                     autoStart = true,
-                    onComplete = {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo("recovery") { inclusive = true }
-                        }
-                    },
-                    onAbandon = {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo("recovery") { inclusive = true }
-                        }
-                    }
+                    onComplete = { leaveRecovery() },
+                    onAbandon = { leaveRecovery() },
+                    onBack = { leaveRecovery() },
                 )
             }
         }

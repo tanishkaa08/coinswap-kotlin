@@ -29,16 +29,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.coinswapmobile.components.LabeledSwitch
-import com.example.coinswapmobile.components.OrbotHelper
-import com.example.coinswapmobile.components.OrbotInstallDialog
-import com.example.coinswapmobile.components.OrbotPromptBanner
+import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.coinswapTextFieldColors
+import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.service.SwapForegroundService
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.viewmodel.SwapViewModel
+import kotlinx.coroutines.launch
 
 data class SwapMaker(
     val id: String,
@@ -80,6 +80,8 @@ private enum class NetworkFee(
 }
 
 private const val TX_VBYTES = 225L
+private const val FIXED_MAKER_COUNT = 2
+private const val FIXED_TX_COUNT = 1
 
 private enum class SwapState { IDLE, CONFIRMING, IN_PROGRESS, DONE }
 
@@ -91,7 +93,7 @@ fun SwapScreen(
 ) {
     val context = LocalContext.current
     val vmState by swapViewModel.uiState.collectAsState()
-    var showOrbotDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -102,23 +104,9 @@ fun SwapScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
-
-    var amountSats       by remember { mutableStateOf("") }
-    var makerCount       by remember { mutableIntStateOf(1) }
-    var txCountInput     by remember { mutableStateOf("1") }
-    var networkFee       by remember { mutableStateOf(NetworkFee.MEDIUM) }
-    var minFidelity      by remember { mutableStateOf("0") }
-    var feeRatePerHop    by remember { mutableStateOf("5.0") }
-    var customOnion      by remember { mutableStateOf("") }
-    var showMakerFilters by remember { mutableStateOf(false) }
-
-    var autoSelectMakers by remember { mutableStateOf(true) }
-    var swapState        by remember { mutableStateOf(SwapState.IDLE) }
-
-    var useManualUtxos   by remember { mutableStateOf(false) }
-    var coinPool         by remember { mutableStateOf(CoinPool.REGULAR) }
-    var selectedOutpoints by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var amountSats by remember { mutableStateOf("") }
+    var networkFee by remember { mutableStateOf(NetworkFee.MEDIUM) }
+    var swapState by remember { mutableStateOf(SwapState.IDLE) }
 
     val allMakers = vmState.makers
 
@@ -126,10 +114,6 @@ fun SwapScreen(
     val swapUtxos    = remember(vmState.utxos) { vmState.utxos.filter { it.pool() == CoinPool.SWAP } }
     val regularTotal = remember(regularUtxos) { regularUtxos.sumOf { it.amountSats } }
     val swapTotal    = remember(swapUtxos) { swapUtxos.sumOf { it.amountSats } }
-
-    LaunchedEffect(regularUtxos.isEmpty(), swapUtxos.isEmpty()) {
-        coinPool = if (regularUtxos.isEmpty() && swapUtxos.isNotEmpty()) CoinPool.SWAP else CoinPool.REGULAR
-    }
 
     LaunchedEffect(vmState.isSwapping, vmState.lastSwapId, vmState.swapError) {
         if (swapState != SwapState.IN_PROGRESS && swapState != SwapState.DONE) return@LaunchedEffect
@@ -140,25 +124,25 @@ fun SwapScreen(
         }
     }
 
-    val amountSatsLong   = amountSats.toLongOrNull() ?: 0L
-    val txCount          = txCountInput.toIntOrNull()?.coerceAtLeast(1) ?: 1
-    val feeRatePerHopPct = feeRatePerHop.toDoubleOrNull() ?: 0.0
-    val minFidelitySats  = minFidelity.toLongOrNull() ?: 0L
-    val eligibleMakers   = allMakers.filter {
-        it.online &&
-            it.feeRatePct <= feeRatePerHopPct &&
-            (it.fidelityBondBtc * 100_000_000).toLong() >= minFidelitySats &&
-            it.minSats <= amountSatsLong &&
-            (it.maxSats <= 0L || it.maxSats >= amountSatsLong) &&
-            (customOnion.isBlank() || it.onionAddress.contains(customOnion, ignoreCase = true))
+    val amountSatsLong = amountSats.toLongOrNull() ?: 0L
+    val makerCount = FIXED_MAKER_COUNT
+    val txCount = FIXED_TX_COUNT
+    val eligibleMakers = allMakers.filter {
+        CoinswapRepository.makerFitsAmount(
+            online = it.online,
+            minSats = it.minSats,
+            maxSats = it.maxSats,
+            liquiditySats = it.liquiditySats,
+            amountSats = amountSatsLong,
+        )
     }
-    val selectedMakers   = eligibleMakers.take(makerCount)
-    val feePerMakerSats  = if (selectedMakers.isNotEmpty()) {
+    val selectedMakers = eligibleMakers.take(makerCount)
+    val feePerMakerSats = if (selectedMakers.isNotEmpty()) {
         selectedMakers.sumOf { m ->
             m.baseFee + ((amountSatsLong * m.feeRatePct) / 100.0).toLong()
         } / selectedMakers.size
     } else {
-        (feeRatePerHopPct / 100.0 * amountSatsLong).toLong()
+        0L
     }
     val totalSwapFeeSats = if (selectedMakers.isNotEmpty()) {
         selectedMakers.sumOf { m ->
@@ -172,13 +156,9 @@ fun SwapScreen(
     val totalFeeSats     = totalSwapFeeSats + miningFeeSats
     val receiveAmtSats   = amountSatsLong - totalFeeSats
 
-    val activePoolUtxos  = if (coinPool == CoinPool.REGULAR) regularUtxos else swapUtxos
-    val manualSelected   = activePoolUtxos.filter { it.outpoint in selectedOutpoints }
-    val manualTotal      = manualSelected.sumOf { it.amountSats }
-    val autoBestPool     = maxOf(regularTotal, swapTotal)
-
+    val autoBestPool = maxOf(regularTotal, swapTotal)
+    val swappableSats = CoinswapRepository.maxSwappableSats(autoBestPool)
     val estimatedMinutes = makerCount * 10
-    val swappableSats    = autoBestPool
 
     Column(
         modifier = Modifier
@@ -230,12 +210,11 @@ fun SwapScreen(
         }
 
         if (!vmState.torReachable) {
-            OrbotPromptBanner(
-                onInstallClick = {
-                    if (OrbotHelper.isOrbotInstalled(context)) {
-                        OrbotHelper.openOrbotApp(context)
-                    } else {
-                        showOrbotDialog = true
+            TorPromptBanner(
+                onRetryClick = {
+                    scope.launch {
+                        TorManager.ensureRunning(context)
+                        swapViewModel.loadWalletData()
                     }
                 },
                 modifier = Modifier.padding(bottom = 8.dp),
@@ -278,91 +257,15 @@ fun SwapScreen(
                 colors = coinswapTextFieldColors(),
                 suffix = { Text("sats", color = TextSecondary) }
             )
-            if (amountSatsLong > 0 && amountSatsLong < 100_000) {
+            if (amountSatsLong > 0 && amountSatsLong < CoinswapRepository.MIN_SWAP_SATS) {
                 WarningBox("Minimum 100,000 sats")
             }
         }
 
-        var showMakerDialog by remember { mutableStateOf(false) }
-        var customMakerInput by remember { mutableStateOf("") }
-        val presetCounts = listOf(1, 2, 3, 4)
-        val isCustomSelected = makerCount !in presetCounts
-
         SectionCard {
-            Text("MAKER COUNT",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                presetCounts.forEach { n ->
-                    val sel = makerCount == n
-                    Button(
-                        onClick = { makerCount = n; customMakerInput = "" },
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (sel) TorActive else SurfaceAlt,
-                            contentColor   = if (sel) androidx.compose.ui.graphics.Color.Black else TextSecondary
-                        )
-                    ) { Text("$n", style = MaterialTheme.typography.labelSmall) }
-                }
-                val customSel = isCustomSelected
-                Button(
-                    onClick = { showMakerDialog = true },
-                    modifier = Modifier.weight(1f).height(40.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (customSel) TorActive else SurfaceAlt,
-                        contentColor   = if (customSel) androidx.compose.ui.graphics.Color.Black else TextSecondary
-                    )
-                ) { Text(if (customSel) "$makerCount" else "5+",
-                        style = MaterialTheme.typography.labelSmall) }
-            }
-        }
-
-        if (showMakerDialog) {
-            AlertDialog(
-                onDismissRequest = { showMakerDialog = false },
-                containerColor   = Surface,
-                title = {
-                    Text("Custom maker count",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary)
-                },
-                text = {
-                    OutlinedTextField(
-                        value = customMakerInput,
-                        onValueChange = { customMakerInput = it.filter { c -> c.isDigit() }.take(2) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        colors = coinswapTextFieldColors(),
-                        suffix = { Text("makers", color = TextSecondary) }
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            customMakerInput.toIntOrNull()?.let { v ->
-                                if (v in 1..20) makerCount = v
-                            }
-                            showMakerDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = TorActive),
-                        shape  = RoundedCornerShape(10.dp)
-                    ) { Text("Set", color = androidx.compose.ui.graphics.Color.Black) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showMakerDialog = false }) {
-                        Text("Cancel", color = TextSecondary)
-                    }
-                }
-            )
+            SectionLabel("ROUTE")
+            SummaryRow("Makers", "$makerCount")
+            SummaryRow("Eligible now", "${eligibleMakers.size}")
         }
 
         SectionCard {
@@ -391,177 +294,23 @@ fun SwapScreen(
             }
         }
 
-        ExpandableSection(
-            title    = "MAKER FILTERS",
-            subtitle = "${eligibleMakers.size} eligible makers",
-            expanded = showMakerFilters,
-            onToggle = { showMakerFilters = !showMakerFilters }
-        ) {
-            LabeledSwitch(
-                label    = "Auto-select best makers",
-                checked  = autoSelectMakers,
-                onChange = { autoSelectMakers = it }
-            )
-
-            HorizontalDivider(color = Divider, modifier = Modifier.padding(vertical = 4.dp))
-
-            Text("MAX FEE PER MAKER",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            OutlinedTextField(
-                value = feeRatePerHop,
-                onValueChange = { feeRatePerHop = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                colors = coinswapTextFieldColors(),
-                suffix = { Text("%", color = TextSecondary) }
-            )
-
-            Text("TRANSACTION SPLITS",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            OutlinedTextField(
-                value = txCountInput,
-                onValueChange = { txCountInput = it.filter { c -> c.isDigit() }.take(2) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                colors = coinswapTextFieldColors(),
-                suffix = { Text("txs", color = TextSecondary) }
-            )
-
-            Text("MIN FIDELITY BOND",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            OutlinedTextField(
-                value = minFidelity,
-                onValueChange = { minFidelity = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                colors = coinswapTextFieldColors(),
-                suffix = { Text("sats", color = TextSecondary) }
-            )
-
-            Text("ONION ADDRESS",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary)
-            OutlinedTextField(
-                value = customOnion,
-                onValueChange = { customOnion = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                colors = coinswapTextFieldColors()
-            )
-        }
-
-        SectionCard {
-            LabeledSwitch(
-                label    = "Choose specific coins",
-                checked  = useManualUtxos,
-                onChange = {
-                    useManualUtxos = it
-                    if (!it) selectedOutpoints = emptySet()
-                },
-            )
-
-            if (!useManualUtxos) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "${formatSats(autoBestPool)} sats",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                )
-            } else {
-                Spacer(Modifier.height(10.dp))
-
-                if (regularUtxos.isNotEmpty() && swapUtxos.isNotEmpty()) {
-                    Text("COIN POOL",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PoolChip(
-                            label    = "Regular (${regularUtxos.size})",
-                            selected = coinPool == CoinPool.REGULAR,
-                            modifier = Modifier.weight(1f),
-                            onClick  = { coinPool = CoinPool.REGULAR; selectedOutpoints = emptySet() },
-                        )
-                        PoolChip(
-                            label    = "From swaps (${swapUtxos.size})",
-                            selected = coinPool == CoinPool.SWAP,
-                            modifier = Modifier.weight(1f),
-                            onClick  = { coinPool = CoinPool.SWAP; selectedOutpoints = emptySet() },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = { selectedOutpoints = activePoolUtxos.map { it.outpoint }.toSet() },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Select all", style = MaterialTheme.typography.labelSmall) }
-                    OutlinedButton(
-                        onClick = { selectedOutpoints = emptySet() },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Clear", style = MaterialTheme.typography.labelSmall) }
-                }
-                Spacer(Modifier.height(8.dp))
-
-                if (activePoolUtxos.isEmpty()) {
-                    Text("No spendable coins in this pool.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary)
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        activePoolUtxos.forEach { utxo ->
-                            val isSelected = utxo.outpoint in selectedOutpoints
-                            UtxoListRow(
-                                utxo = utxo.copy(selected = isSelected),
-                                onToggle = {
-                                    selectedOutpoints = if (isSelected) {
-                                        selectedOutpoints - utxo.outpoint
-                                    } else {
-                                        selectedOutpoints + utxo.outpoint
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "${manualSelected.size} coin(s) • ${formatSats(manualTotal)} sats",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (manualTotal >= amountSatsLong && amountSatsLong > 0) TorActive else TextPrimary,
-                )
-            }
-        }
-
-        val fundsOk = if (useManualUtxos) manualTotal >= amountSatsLong else autoBestPool >= amountSatsLong
+        val fundsOk = CoinswapRepository.poolCanFundSwap(autoBestPool, amountSatsLong)
         val canSwap = vmState.capabilities?.coinswap == true
-            && amountSatsLong >= 100_000
+            && !vmState.isSwapping
+            && amountSatsLong >= CoinswapRepository.MIN_SWAP_SATS
             && eligibleMakers.size >= makerCount
             && fundsOk
+            && receiveAmtSats > 0L
 
         val validationMessage: String? = when {
+            vmState.isSwapping -> "A swap is already running"
             amountSatsLong <= 0 -> "Enter an amount"
-            amountSatsLong < 100_000 -> "Minimum 100,000 sats"
+            amountSatsLong < CoinswapRepository.MIN_SWAP_SATS -> "Minimum 100,000 sats"
             eligibleMakers.size < makerCount ->
                 "Not enough makers (${eligibleMakers.size}/${makerCount})"
-            useManualUtxos && manualSelected.isEmpty() ->
-                "Select at least one coin"
-            useManualUtxos && manualTotal < amountSatsLong ->
-                "Selected coins below swap amount"
-            !useManualUtxos && autoBestPool < amountSatsLong ->
-                "Insufficient funds"
+            !fundsOk ->
+                "Need ${formatSats(amountSatsLong + CoinswapRepository.SWAP_PREPARE_RESERVE_SATS)} sats in one coin pool (includes fee reserve)"
+            receiveAmtSats <= 0L -> "Fees exceed swap amount"
             else -> null
         }
 
@@ -587,10 +336,9 @@ fun SwapScreen(
         Button(
             onClick = {
                 if (!vmState.torReachable) {
-                    if (OrbotHelper.isOrbotInstalled(context)) {
-                        OrbotHelper.openOrbotApp(context)
-                    } else {
-                        showOrbotDialog = true
+                    scope.launch {
+                        TorManager.ensureRunning(context)
+                        swapViewModel.loadWalletData()
                     }
                     return@Button
                 }
@@ -624,16 +372,15 @@ fun SwapScreen(
             miningFeeSats = miningFeeSats,
             totalFeeSats  = totalFeeSats,
             receiveSats   = if (receiveAmtSats > 0) receiveAmtSats else 0L,
-            manualCoins   = if (useManualUtxos) manualSelected.size else 0,
+            manualCoins   = 0,
             onConfirm     = {
                 swapState = SwapState.IN_PROGRESS
                 swapViewModel.beginSwap(
                     amountSats      = amountSatsLong,
                     makerCount      = makerCount,
                     txCount         = txCount,
-                    manual          = useManualUtxos,
-                    selectedUtxos   = if (useManualUtxos) manualSelected else emptyList(),
-                    makerIds        = selectedMakers.map { it.onionAddress },
+                    manual          = false,
+                    selectedUtxos   = emptyList(),
                 )
             },
             onDismiss     = { swapState = SwapState.IDLE }
@@ -660,7 +407,7 @@ fun SwapScreen(
                 onSwapFailed()
             },
             onStopSwap    = {
-                SwapForegroundService.stop(context.applicationContext)
+                swapViewModel.cancelPreparingSwap()
             },
             onViewReport  = {
                 swapState = SwapState.IDLE
@@ -1018,7 +765,7 @@ private fun SwapProgressOverlay(
                 stage      = stage
             )
 
-            if (!finished && !failed && (isSwapping || stage == SwapStage.PREPARING)) {
+            if (!finished && !failed && stage == SwapStage.PREPARING) {
                 OutlinedButton(
                     onClick  = onStopSwap,
                     modifier = Modifier.fillMaxWidth().height(52.dp),

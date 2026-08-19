@@ -19,11 +19,11 @@ import kotlinx.coroutines.withContext
 import org.coinswap.AddressType
 import org.coinswap.MakerOfferCandidate
 import org.coinswap.OutPoint
+import org.coinswap.RpcConfig
 import org.coinswap.SwapParams
 import org.coinswap.SwapReport
 import org.coinswap.Taker
 import org.coinswap.Txid
-import org.coinswap.createDefaultRpcConfig
 import org.coinswap.fetchMempoolFees
 import org.coinswap.restoreWalletGuiApp
 import org.coinswap.setupLogging
@@ -62,11 +62,15 @@ class CoinswapRepository(
         coinswap = true,
         reports = true,
         recovery = true,
-        backend = "BITCOIN_CORE_RPC",
+        backend = "ELECTRUM",
         missingApis = emptyList(),
     )
 
-    suspend fun initTaker(session: UserSession, forceReconnect: Boolean = false): Result<WalletState> =
+    suspend fun initTaker(
+        session: UserSession,
+        forceReconnect: Boolean = false,
+        config: TakerAppConfig = session.config,
+    ): Result<WalletState> =
         TakerHolder.initMutex.withLock {
             if (TakerHolder.isInitialized && !forceReconnect) {
                 return@withLock callFfi("getBalances") {
@@ -75,22 +79,24 @@ class CoinswapRepository(
             }
             callFfi("Taker.init") {
                 FfiEnv.ensureHome(appDataDir)
-                val cfg = session.config
+                val cfg = config
                 require(cfg.torControlPort in 1..65535) {
                     "Tor control port must be 1..65535 (got ${cfg.torControlPort})"
                 }
                 // Drop any prior Taker before reconnecting so a failed init cannot
                 // leave the old backend live against a newly saved session config.
                 TakerHolder.clear()
-                setupLogging(appDataDir)
+                setupLogging(dataDir = appDataDir, level = "info", toStdout = false)
                 val taker = Taker.init(
                     dataDir = appDataDir,
                     walletFileName = cfg.walletName,
-                    rpcConfig = session.toRpcConfig(),
+                    rpcConfig = null,
                     controlPort = cfg.torControlPort.toUShort(),
                     torAuthPassword = cfg.torAuthPassword.ifBlank { null },
-                    zmqAddr = cfg.zmqAddr,
+                    zmqAddr = TakerAppConfig.DUMMY_ZMQ_ADDR,
                     password = cfg.walletPassword.ifBlank { null },
+                    nostrRelays = null,
+                    backendConfig = cfg.toBackendConfig(),
                 )
                 try {
                     try {
@@ -125,7 +131,13 @@ class CoinswapRepository(
         restoreWalletGuiApp(
             dataDir = appDataDir,
             walletFileName = session.walletName,
-            rpcConfig = session.toRpcConfig(),
+            // Electrum FFI restore still takes RpcConfig; wallet file restore does not use Core.
+            rpcConfig = RpcConfig(
+                url = "127.0.0.1:18442",
+                username = "user",
+                password = "password",
+                walletName = session.walletName,
+            ),
             backupFilePath = backupPath,
             password = session.config.walletPassword.ifBlank { null },
         )
@@ -148,7 +160,7 @@ class CoinswapRepository(
         callFfi("getNextExternalAddress") {
             TakerHolder.require()
                 .getNextExternalAddress(AddressType(addrType = addrType))
-                .address
+                .addr
         }
 
     suspend fun sendToAddress(
@@ -187,7 +199,7 @@ class CoinswapRepository(
                             amount < 0 -> "outgoing"
                             else -> tx.detail.category.lowercase().ifBlank { "unknown" }
                         },
-                        address = tx.detail.address?.address,
+                        address = tx.detail.address?.addr,
                         category = tx.detail.category,
                     )
                 }
@@ -259,7 +271,7 @@ class CoinswapRepository(
         makerIds: List<String>,
         txCount: Int = 1,
         protocol: String = "Legacy",
-    ): Result<PreparedSwap> = callFfi("prepareCoinswap") {
+    ): Result<PreparedSwap> = callFfiLong("prepareCoinswap") {
         val outpoints = selectedUtxos.takeIf { it.isNotEmpty() }?.map { u ->
             OutPoint(txid = Txid(value = u.txid), vout = u.vout.toUInt())
         }
@@ -268,7 +280,10 @@ class CoinswapRepository(
             sendAmount = amountSats.toULong(),
             makerCount = makerCount.toUInt(),
             txCount = txCount.coerceAtLeast(1).toUInt(),
-            requiredConfirms = null,
+            // 0: do not sit on maker sockets during the confirm wait. That wait
+            // kills the Tor/TCP route; the maker waits for confirmations itself
+            // after ProofOfFunding arrives.
+            requiredConfirms = 0u,
             manuallySelectedOutpoints = outpoints,
             preferredMakers = makerIds.takeIf { it.isNotEmpty() },
         )
@@ -349,6 +364,10 @@ class CoinswapRepository(
             swapId.ifBlank { "recovery loop started" }
         }
 
+    fun clearRecoveryMarker() {
+        File(appDataDir, "recovery_in_progress").delete()
+    }
+
     suspend fun backupWallet(destinationPath: String, password: String? = null): Result<Unit> =
         callFfi("backup") {
             TakerHolder.require().backup(destinationPath, password)
@@ -359,10 +378,7 @@ class CoinswapRepository(
         Triple(fees.economy, fees.standard, fees.fastest)
     }
 
-    suspend fun defaultRpcHint(): Result<String> = callFfi("createDefaultRpcConfig") {
-        val d = createDefaultRpcConfig()
-        "${d.url} (${d.walletName})"
-    }
+    fun defaultElectrumHint(): String = TakerAppConfig.DEFAULT_ELECTRUM_URL
 
     fun clearTaker() {
         TakerHolder.clear()
@@ -386,7 +402,7 @@ class CoinswapRepository(
             balanceSats = balances.spendable,
             confirmedSats = balances.spendable,
             unconfirmedSats = 0,
-            backend = "BITCOIN_CORE_RPC",
+            backend = "ELECTRUM",
             utxos = utxos,
             regularSats = balances.regular,
             swapSats = balances.swap,
@@ -572,7 +588,7 @@ class CoinswapRepository(
         val lower = raw.lowercase()
         return when {
             lower.contains("fill whole buffer") || lower.contains("unexpectedeof") ->
-                "Maker Tor connection dropped. Sync Markets, use 1 maker, retry."
+                "Maker Tor connection dropped. Sync Markets and retry."
             lower.contains("tor") && lower.contains("connect") ->
                 "Tor connection failed"
             lower.contains("timeout") ->
@@ -620,6 +636,33 @@ class CoinswapRepository(
         }
 
     companion object {
+        /**
+         * Rust `prepare_coinswap` requires `send_amount + 10_000` sats in the wallet
+         * so coin selection has room for mining fees. USE MAX must keep this reserve.
+         */
+        const val SWAP_PREPARE_RESERVE_SATS = 10_000L
+        const val MIN_SWAP_SATS = 100_000L
+
+        fun maxSwappableSats(poolSats: Long): Long =
+            (poolSats - SWAP_PREPARE_RESERVE_SATS).coerceAtLeast(0L)
+
+        fun poolCanFundSwap(poolSats: Long, amountSats: Long): Boolean =
+            amountSats > 0L && poolSats >= amountSats + SWAP_PREPARE_RESERVE_SATS
+
+        fun makerFitsAmount(
+            online: Boolean,
+            minSats: Long,
+            maxSats: Long,
+            liquiditySats: Long,
+            amountSats: Long,
+        ): Boolean {
+            if (!online || amountSats <= 0L) return false
+            if (amountSats < minSats) return false
+            if (maxSats > 0L && amountSats > maxSats) return false
+            if (liquiditySats > 0L && amountSats > liquiditySats) return false
+            return true
+        }
+
         /** Reject path traversal / separators before using swapId as a filename. */
         fun isSafeSwapId(swapId: String): Boolean {
             if (swapId.isBlank()) return false

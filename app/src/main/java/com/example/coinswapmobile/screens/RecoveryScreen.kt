@@ -3,6 +3,7 @@ package com.example.coinswapmobile.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -27,6 +28,7 @@ import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
 import com.example.coinswapmobile.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
@@ -93,6 +95,8 @@ fun RecoveryScreen(
     val swapRepo = remember { SwapRepository(repo) }
     val session = remember { UserSession(context) }
 
+    BackHandler(enabled = uiState == RecoveryUiState.InProgress) { }
+
     fun appendLog(line: String) { logs = logs + line }
 
     suspend fun runRecovery() {
@@ -142,13 +146,67 @@ fun RecoveryScreen(
 
         appendLog("[recovery] Running recoverActiveSwap…")
         val swapId = swaps.firstOrNull { it.recoverable }?.swapId.orEmpty()
+        val before = repo.getBalance().getOrNull()
+        val spendableBefore = before?.balanceSats ?: 0L
         val result = swapRepo.recoverActiveSwap(swapId)
-        uiState = if (result.isSuccess) RecoveryUiState.Complete else RecoveryUiState.Failed
-        if (result.isSuccess) {
-            appendLog("[recovery] ${result.getOrNull()}")
-        } else {
+        if (result.isFailure) {
             appendLog("[recovery] Error: ${result.exceptionOrNull()?.message}")
+            uiState = RecoveryUiState.Failed
+            isRunning = false
+            return
         }
+        appendLog("[recovery] ${result.getOrNull()}")
+
+        val after = repo.getBalance().getOrNull()
+        val lockedAfter = after?.contractSats ?: 0L
+        val spendableAfter = after?.balanceSats ?: spendableBefore
+        // Failed swaps from a previous regtest chain have outgoing swapcoins
+        // whose funding txs are gone. Wallet contract balance stays 0; waiting
+        // cannot reclaim them. Leave recovery so the user can swap again.
+        if (lockedAfter == 0L && (before?.contractSats ?: 0L) == 0L) {
+            appendLog(
+                "[recovery] No locked contract coins on this chain (spendable=$spendableAfter). Nothing to wait for.",
+            )
+            repo.clearRecoveryMarker()
+            uiState = RecoveryUiState.Complete
+            isRunning = false
+            return
+        }
+
+        var sawLocked = (before?.contractSats ?: 0L) > 0L
+        var reclaimed = false
+        var remaining = 120
+        while (remaining-- > 0) {
+            val bal = repo.getBalance().getOrNull()
+            val locked = bal?.contractSats ?: -1L
+            val spendable = bal?.balanceSats ?: spendableBefore
+            if (locked > 0L) sawLocked = true
+            if (spendable > spendableBefore + 50_000L) {
+                appendLog("[recovery] Spendable increased to $spendable sats")
+                reclaimed = true
+                break
+            }
+            if (sawLocked && locked == 0L) {
+                reclaimed = true
+                break
+            }
+            if (locked > 0L) {
+                appendLog("[recovery] Waiting for locked coins… $locked sats")
+            } else {
+                appendLog("[recovery] Waiting for reclaim… spendable=$spendable")
+            }
+            delay(5_000)
+        }
+
+        if (!reclaimed) {
+            appendLog("[recovery] Coins still in outgoing contracts")
+            uiState = RecoveryUiState.Failed
+            isRunning = false
+            return
+        }
+
+        repo.clearRecoveryMarker()
+        uiState = RecoveryUiState.Complete
         isRunning = false
     }
 
@@ -167,9 +225,16 @@ fun RecoveryScreen(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val backAction = onBack ?: onAbandon
-            IconButton(onClick = backAction) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
+            val canLeave = uiState != RecoveryUiState.InProgress
+            IconButton(
+                onClick = { if (canLeave) (onBack ?: onAbandon)() },
+                enabled = canLeave,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    "Back",
+                    tint = if (canLeave) TextPrimary else TextSecondary,
+                )
             }
             Text("Recovery",
                 style = MaterialTheme.typography.titleMedium,
@@ -214,7 +279,7 @@ fun RecoveryScreen(
                     }
                 }
                 RecoveryUiState.Complete -> {
-                    Text("Recovery started",
+                    Text("Recovery completed",
                         style = MaterialTheme.typography.titleMedium,
                         color = TorActive)
                 }
@@ -264,6 +329,22 @@ fun RecoveryScreen(
                     }
                 }
                 RecoveryUiState.Failed -> {
+                    Button(
+                        onClick = {
+                            repo.clearRecoveryMarker()
+                            onAbandon()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = TorActive)
+                    ) {
+                        Text(
+                            "Continue to Home",
+                            color = androidx.compose.ui.graphics.Color.Black,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+
                     OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)

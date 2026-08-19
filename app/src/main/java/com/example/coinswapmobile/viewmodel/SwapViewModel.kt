@@ -15,6 +15,7 @@ import com.example.coinswapmobile.screens.SwapMaker
 import com.example.coinswapmobile.screens.SwapUtxo
 import com.example.coinswapmobile.service.SwapExecutionBus
 import com.example.coinswapmobile.service.SwapForegroundService
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -48,6 +49,10 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     )
     val uiState = _state.asStateFlow()
 
+    private var beginJob: Job? = null
+    /** True once native prepare/start has begun — Stop must not cancel that. */
+    private var nativeSwapStarted = false
+
     init {
         loadWalletData()
         viewModelScope.launch {
@@ -66,6 +71,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 if (event.completed || event.failed) {
+                    nativeSwapStarted = false
                     loadWalletData()
                 }
             }
@@ -73,12 +79,13 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun loadWalletData() {
+        if (_state.value.isSwapping || SwapExecutionBus.active.value) return
         if (!session.isLoggedIn) {
             _state.update { it.copy(isLoading = false, walletSats = 0, utxos = emptyList()) }
             return
         }
         viewModelScope.launch {
-            val tor = TorManager.checkSocks()
+            val tor = TorManager.ensureRunning(getApplication())
             _state.update {
                 it.copy(
                     isLoading = true,
@@ -101,7 +108,9 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { state ->
                     val utxos = state.utxos
                         .filter { u ->
-                            u.spendable && (u.spendType == "SeedCoin" || u.spendType == "SweptCoin")
+                            u.spendable &&
+                                (u.confirmations ?: 0) > 0 &&
+                                (u.spendType == "SeedCoin" || u.spendType == "SweptCoin")
                         }
                         .map { u ->
                             SwapUtxo(
@@ -147,6 +156,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun beginSwap(
         amountSats: Long,
         makerCount: Int,
@@ -156,8 +166,11 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         makerIds: List<String> = emptyList(),
         protocol: String = session.config.protocol,
     ) {
-        viewModelScope.launch {
-            val tor = TorManager.checkSocks()
+        if (_state.value.isSwapping || SwapExecutionBus.active.value) return
+        beginJob?.cancel()
+        nativeSwapStarted = false
+        beginJob = viewModelScope.launch {
+            val tor = TorManager.ensureRunning(getApplication())
             if (!tor.reachable) {
                 _state.update {
                     it.copy(swapError = "Tor SOCKS required for swaps: ${tor.message}")
@@ -196,62 +209,87 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     failSwap(e.message)
                     return@launch
                 }
-            if (manual) {
-                val balance = coinswapRepo.getBalance()
-                if (balance.isFailure) {
-                    failSwap(balance.exceptionOrNull()?.message)
-                    return@launch
+            val funded = coinswapRepo.getBalance().getOrNull()
+            val regularPool = funded?.utxos.orEmpty()
+                .filter { u ->
+                    u.spendable && (u.confirmations ?: 0) > 0 &&
+                        (u.spendType == null || u.spendType == "SeedCoin")
                 }
-                val freshUtxos = balance.getOrNull()?.utxos.orEmpty()
+                .sumOf { it.amountSats }
+            val swapPool = funded?.utxos.orEmpty()
+                .filter { u ->
+                    u.spendable && (u.confirmations ?: 0) > 0 && u.spendType == "SweptCoin"
+                }
+                .sumOf { it.amountSats }
+            val bestPool = maxOf(regularPool, swapPool)
+            if (!CoinswapRepository.poolCanFundSwap(bestPool, amountSats)) {
+                failSwap(
+                    "Need ${CoinswapRepository.SWAP_PREPARE_RESERVE_SATS} extra sats in one coin pool for mining fees",
+                )
+                return@launch
+            }
+            if (manual) {
+                val freshUtxos = funded?.utxos.orEmpty()
                 val invalid = selectedUtxos.filter { sel ->
-                    freshUtxos.none { it.txid == sel.txid && it.vout == sel.vout && it.spendable }
+                    freshUtxos.none {
+                        it.txid == sel.txid && it.vout == sel.vout && it.spendable &&
+                            (it.confirmations ?: 0) > 0
+                    }
                 }
                 if (invalid.isNotEmpty()) {
-                    failSwap("Selected coins are locked")
+                    failSwap("Selected coins are locked or unconfirmed")
                     return@launch
                 }
             }
             _state.update { it.copy(swapPhase = "Checking makers…") }
-            // Fresh Tor poll so we don't start against stale "online" makers.
-            val offerSync = withTimeoutOrNull(PRE_SWAP_OFFER_SYNC_MS) {
-                coinswapRepo.syncOfferbook()
-            }
-            if (offerSync == null) {
-                _state.update { it.copy(swapPhase = "Maker check timed out — using cache…") }
-            } else if (offerSync.isFailure) {
-                failSwap(
-                    offerSync.exceptionOrNull()?.message
-                        ?: "Could not reach makers over Tor",
-                )
-                return@launch
-            }
+            fun eligible(makers: List<com.example.coinswapmobile.model.MakerUiModel>) =
+                makers.filter { m ->
+                    CoinswapRepository.makerFitsAmount(
+                        online = m.online,
+                        minSats = m.minSats,
+                        maxSats = m.maxSats,
+                        liquiditySats = m.liquiditySats,
+                        amountSats = amountSats,
+                    )
+                }
 
-            val makers = coinswapRepo.listMakers().getOrElse { e ->
+            var makers = coinswapRepo.listMakers().getOrElse { e ->
                 failSwap(e.message)
                 return@launch
             }
-            val online = makers.filter { it.online }
-            val preferred = if (makerIds.isNotEmpty()) {
-                makerIds.filter { id ->
-                    online.any { it.onionAddress == id || it.id == id }
+            if (eligible(makers).size < makerCount) {
+                val offerSync = withTimeoutOrNull(PRE_SWAP_OFFER_SYNC_MS) {
+                    coinswapRepo.syncOfferbook()
                 }
-            } else {
-                online.take(makerCount).map { it.onionAddress }
+                if (offerSync == null) {
+                    _state.update { it.copy(swapPhase = "Maker check timed out — using cache…") }
+                } else if (offerSync.isFailure) {
+                    failSwap(
+                        offerSync.exceptionOrNull()?.message
+                            ?: "Could not reach makers over Tor",
+                    )
+                    return@launch
+                }
+                makers = coinswapRepo.listMakers().getOrElse { e ->
+                    failSwap(e.message)
+                    return@launch
+                }
             }
-            if (preferred.size < makerCount) {
+            if (eligible(makers).size < makerCount) {
                 failSwap(
-                    "Only ${preferred.size} reachable maker(s); need $makerCount. Sync Markets and retry with 1 maker.",
+                    "Only ${eligible(makers).size} eligible maker(s); this app requires $makerCount makers for each swap.",
                 )
                 return@launch
             }
 
             _state.update { it.copy(swapPhase = "Preparing…") }
+            nativeSwapStarted = true
             swapRepo.prepareCoinswap(
                 amountSats = amountSats,
                 makerCount = makerCount,
                 selectedUtxos = selectedUtxos,
                 txCount = txCount,
-                makerIds = preferred.take(makerCount),
+                makerIds = emptyList(),
                 protocol = protocol,
                 manualSelection = manual,
             )
@@ -267,12 +305,21 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     SwapForegroundService.start(getApplication(), prepared)
                 }
                 .onFailure { e ->
+                    nativeSwapStarted = false
                     failSwap(e.message)
                 }
         }
     }
 
+    /** Cancel only before native prepare/start. Aborting mid-protocol locks coins. */
+    fun cancelPreparingSwap() {
+        if (nativeSwapStarted || _state.value.preparedSwap != null) return
+        beginJob?.cancel()
+        failSwap("Swap cancelled")
+    }
+
     private fun failSwap(message: String?) {
+        nativeSwapStarted = false
         SwapExecutionBus.emit(
             SwapExecutionBus.Event(
                 swapId = null,

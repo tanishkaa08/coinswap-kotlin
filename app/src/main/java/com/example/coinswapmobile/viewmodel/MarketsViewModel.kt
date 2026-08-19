@@ -54,7 +54,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshTorStatus() {
         viewModelScope.launch {
-            val tor = TorManager.checkSocks()
+            val tor = TorManager.ensureRunning(getApplication())
             _state.update { it.copy(torReachable = tor.reachable, torStatusMessage = tor.message) }
         }
     }
@@ -94,7 +94,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
         val doTorPoll = pollTor && (manual || !SwapExecutionBus.active.value)
 
         syncLock.withLock {
-            val tor = TorManager.checkSocks()
+            val tor = TorManager.ensureRunning(getApplication())
             if (!tor.reachable) {
                 _state.update {
                     it.copy(

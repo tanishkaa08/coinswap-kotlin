@@ -150,6 +150,11 @@ class SwapForegroundService : Service() {
     }
 
     private fun requestStop(userCancelled: Boolean) {
+        // Native startCoinswap cannot be aborted. Cancelling the Kotlin job
+        // drops the result while Rust keeps running, then recovery races it.
+        if (swapJob?.isActive == true) {
+            return
+        }
         if (userCancelled) {
             SwapExecutionBus.emit(
                 SwapExecutionBus.Event(

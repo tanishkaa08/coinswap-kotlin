@@ -11,9 +11,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.CallMade
-import androidx.compose.material.icons.automirrored.filled.CallReceived
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,32 +29,37 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.coinswapmobile.components.OrbotHelper
-import com.example.coinswapmobile.components.OrbotInstallDialog
-import com.example.coinswapmobile.components.OrbotPromptBanner
+import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.components.TorStatusBadge
 import com.example.coinswapmobile.components.UtxoCard
 import com.example.coinswapmobile.components.UtxoItem
+import com.example.coinswapmobile.data.DisplayCurrency
+import com.example.coinswapmobile.data.TorManager
+import com.example.coinswapmobile.data.UserSession
+import com.example.coinswapmobile.data.formatAmount
 import com.example.coinswapmobile.model.UtxoUiModel
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.viewmodel.WalletUiState
 import com.example.coinswapmobile.viewmodel.WalletViewModel
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
-    onSendClick: () -> Unit = {},
-    onReceiveClick: () -> Unit = {},
+    onTransactClick: () -> Unit = {},
     walletViewModel: WalletViewModel = viewModel(),
 ) {
     val uiState by walletViewModel.uiState.collectAsState()
     var balanceVisible by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    var showOrbotDialog by remember { mutableStateOf(false) }
+    val session = remember { UserSession(context) }
+    var currency by remember { mutableStateOf(session.displayCurrency) }
+    val scope = rememberCoroutineScope()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                currency = session.displayCurrency
                 walletViewModel.refreshBalances()
                 walletViewModel.refreshTorStatus()
             }
@@ -58,8 +67,6 @@ fun HomeScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-
-    OrbotInstallDialog(visible = showOrbotDialog, onDismiss = { showOrbotDialog = false })
 
     LazyColumn(
         modifier = Modifier
@@ -70,9 +77,6 @@ fun HomeScreen(
     ) {
         item {
             HomeTorHeader(
-                backendLabel = uiState.backendLabel,
-                libraryLoadStatus = uiState.libraryLoadStatus,
-                isInitialized = uiState.isInitialized,
                 torActive = uiState.torReachable && uiState.isInitialized,
                 error = uiState.error,
             )
@@ -80,12 +84,11 @@ fun HomeScreen(
 
         if (uiState.isInitialized && !uiState.torReachable) {
             item {
-                OrbotPromptBanner(
-                    onInstallClick = {
-                        if (OrbotHelper.isOrbotInstalled(context)) {
-                            OrbotHelper.openOrbotApp(context)
-                        } else {
-                            showOrbotDialog = true
+                TorPromptBanner(
+                    onRetryClick = {
+                        scope.launch {
+                            TorManager.ensureRunning(context)
+                            walletViewModel.refreshTorStatus()
                         }
                     },
                 )
@@ -95,13 +98,14 @@ fun HomeScreen(
         item {
             HomeBalanceCard(
                 uiState = uiState,
+                currency = currency,
                 balanceVisible = balanceVisible,
                 onToggleVisibility = { balanceVisible = !balanceVisible },
             )
         }
 
         item {
-            HomeActionRow(onSendClick = onSendClick, onReceiveClick = onReceiveClick)
+            HomeActionRow(onTransactClick = onTransactClick)
         }
 
         item {
@@ -130,9 +134,6 @@ fun HomeScreen(
 
 @Composable
 private fun HomeTorHeader(
-    backendLabel: String,
-    libraryLoadStatus: String,
-    isInitialized: Boolean,
     torActive: Boolean,
     error: String?,
 ) {
@@ -145,16 +146,8 @@ private fun HomeTorHeader(
             Spacer(Modifier.weight(1f))
             TorStatusBadge(isActive = torActive)
         }
-        Text(
-            if (backendLabel.isNotBlank()) backendLabel else "Bitcoin Core RPC • not connected",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary,
-        )
-        if (!isInitialized && libraryLoadStatus.isNotBlank()) {
-            Text(libraryLoadStatus, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-        }
         error?.let { message ->
-            Text("⚠  $message", style = MaterialTheme.typography.labelSmall, color = TorInactive)
+            Text(message, style = MaterialTheme.typography.labelSmall, color = TorInactive)
         }
     }
 }
@@ -162,6 +155,7 @@ private fun HomeTorHeader(
 @Composable
 private fun HomeBalanceCard(
     uiState: WalletUiState,
+    currency: DisplayCurrency,
     balanceVisible: Boolean,
     onToggleVisibility: () -> Unit,
 ) {
@@ -189,7 +183,7 @@ private fun HomeBalanceCard(
                 )
             } else {
                 Text(
-                    text = if (visible) "%,d sats".format(uiState.balanceSats) else "●●●●●●",
+                    text = if (visible) formatAmount(uiState.balanceSats, currency) else "●●●●●●",
                     style = MaterialTheme.typography.headlineMedium,
                     color = TextPrimary
                 )
@@ -199,13 +193,12 @@ private fun HomeBalanceCard(
 }
 
 @Composable
-private fun HomeActionRow(onSendClick: () -> Unit, onReceiveClick: () -> Unit) {
+private fun HomeActionRow(onTransactClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ActionButton("SEND", Icons.AutoMirrored.Filled.CallMade, Modifier.weight(1f), onSendClick)
-        ActionButton("RECEIVE", Icons.AutoMirrored.Filled.CallReceived, Modifier.weight(1f), onReceiveClick)
+        ActionButton("TRANSACT", Icons.Default.SwapHoriz, Modifier.weight(1f), onTransactClick)
     }
 }
 

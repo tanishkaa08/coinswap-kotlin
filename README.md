@@ -11,14 +11,16 @@ Compose UI
       → Generated UniFFI Kotlin (org.coinswap)
         → libcoinswap_ffi.so
           → Rust Taker
-            → Bitcoin Core RPC + ZMQ + Tor
+            → Electrum (electrs) + Tor
 ```
 
-No Electrum client and no custom JNI wrapper.
+The wallet talks to an Electrum server. Bitcoin Core RPC and ZMQ are not used by this app.
+Maker discovery still goes over the in-app Tor daemon.
 
 ## Native bindings
 
-This app consumes the generated UniFFI sources and ARM64 library from a sibling checkout:
+This app consumes the generated UniFFI sources and ARM64 library from a sibling checkout of
+[coinswap-ffi](https://github.com/citadel-tech/coinswap-ffi) on the **electrum** branch:
 
 - `../coinswap-ffi/coinswap-kotlin/lib/src/main/kotlin/org/coinswap/coinswap.kt`
 - `../coinswap-ffi/coinswap-kotlin/lib/src/main/jniLibs/arm64-v8a/libcoinswap_ffi.so`
@@ -28,27 +30,42 @@ Override the checkout with `-PcoinswapFfiRoot=/path/to/coinswap-ffi` if needed.
 
 Requires JNA (`net.java.dev.jna:jna`) for UniFFI library loading.
 
+Rebuild the native library after checking out `electrum`:
+
+```bash
+git -C ../coinswap-ffi checkout electrum
+# then run _build_ffi_master.sh from WSL with Android NDK
+```
+
 ## Setup
 
-On first launch you enter connection settings (with sensible defaults):
-
-- RPC host, port, username, password
-- ZMQ host/port (`tcp://host:port`)
-- Tor SOCKS + control ports (optional auth)
-- Wallet name + password
-
-Then the app calls:
+On first launch you only set a wallet passcode. The app uses a single hardcoded wallet name
+and connects to Electrum automatically:
 
 ```kotlin
 Taker.init(
     dataDir = appDataDir,
     walletFileName = cfg.walletName,
-    rpcConfig = session.toRpcConfig(),
+    rpcConfig = null,
     controlPort = cfg.torControlPort.toUShort(),
     torAuthPassword = cfg.torAuthPassword.ifBlank { null },
-    zmqAddr = cfg.zmqAddr,
+    zmqAddr = TakerAppConfig.DUMMY_ZMQ_ADDR, // ignored for Electrum
     password = cfg.walletPassword.ifBlank { null },
+    nostrRelays = null,
+    backendConfig = BackendConfig(
+        kind = "electrum",
+        url = "tcp://<electrs-host>:50001",
+        username = null,
+        password = null,
+        walletName = null,
+        zmqAddr = null,
+        socks5 = null, // set only for .onion Electrum URLs
+        timeout = null,
+        pollIntervalSecs = null,
+        maxRetries = null,
+    ),
 )
 ```
 
-Blank Tor auth / wallet passwords are passed as `null` (same as desktop). The live instance is kept in `TakerHolder`.
+Pass `-PdemoRegtestHost=<lan-ip>` so the app targets your electrs instance (`tcp://<lan-ip>:50001`).
+The live instance is kept in `TakerHolder`.

@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,13 +45,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.coinswapmobile.BuildConfig
-import com.example.coinswapmobile.components.OrbotHelper
-import com.example.coinswapmobile.components.OrbotInstallDialog
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerAppConfig
+import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.coinswapmobile.ui.theme.Background
 import com.example.coinswapmobile.ui.theme.Divider
 import com.example.coinswapmobile.ui.theme.Surface
@@ -71,88 +71,77 @@ fun LoginScreen(onConnected: () -> Unit) {
     val initial = remember { session.config }
     val demoHost = remember { BuildConfig.DEMO_REGTEST_HOST.trim() }
 
-    var rpcHost by remember {
-        mutableStateOf(
-            when {
-                demoHost.isNotBlank() -> demoHost
-                else -> initial.rpcHost
-            }
-        )
-    }
-    var rpcPort by remember {
-        mutableStateOf(
-            when {
-                demoHost.isNotBlank() -> TakerAppConfig.REGTEST_RPC_PORT.toString()
-                else -> initial.rpcPort.toString()
-            }
-        )
-    }
-    var rpcUser by remember { mutableStateOf(initial.rpcUsername) }
-    var rpcPass by remember { mutableStateOf(initial.rpcPassword) }
-    var zmqHost by remember {
-        mutableStateOf(
-            when {
-                demoHost.isNotBlank() -> demoHost
-                else -> initial.zmqHost
-            }
-        )
-    }
-    var zmqPort by remember { mutableStateOf(initial.zmqPort.toString()) }
-    var torControl by remember { mutableStateOf(initial.torControlPort.toString()) }
-    var torAuth by remember { mutableStateOf(initial.torAuthPassword) }
-    var walletName by remember { mutableStateOf(initial.walletName) }
     var walletPassword by remember { mutableStateOf(initial.walletPassword) }
+    var confirmPassword by remember { mutableStateOf(initial.walletPassword) }
     var showPwd by remember { mutableStateOf(false) }
     var connecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showOrbotDialog by remember { mutableStateOf(false) }
+    var torStatus by remember { mutableStateOf("Starting Tor…") }
+
+    val autoConfig = remember(demoHost, initial, walletPassword) {
+        if (demoHost.isNotBlank()) {
+            TakerAppConfig(
+                electrumUrl = TakerAppConfig.electrumUrlForHost(demoHost),
+                torControlPort = initial.torControlPort,
+                torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
+                torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
+                torAuthPassword = TakerAppConfig.DEMO_TOR_PASSWORD,
+                walletName = TakerAppConfig.DEFAULT_WALLET_NAME,
+                walletPassword = walletPassword,
+                protocol = initial.protocol,
+            )
+        } else {
+            initial.copy(
+                walletName = TakerAppConfig.DEFAULT_WALLET_NAME,
+                walletPassword = walletPassword,
+            )
+        }
+    }
 
     LaunchedEffect(Unit) {
-        if (!OrbotHelper.isOrbotInstalled(context)) {
-            showOrbotDialog = true
+        torStatus = "Starting Tor…"
+        val status = TorManager.ensureRunning(context)
+        torStatus = status.message
+        if (!status.reachable) {
+            error = status.message
         }
     }
 
     fun connect() {
-        val port = rpcPort.toIntOrNull()
-        val zPort = zmqPort.toIntOrNull()
-        val cPort = torControl.toIntOrNull()
-        if (rpcHost.isBlank() || port == null || zPort == null || cPort == null) {
-            error = "Fill RPC, ZMQ, and Tor ports with valid numbers"
+        if (walletPassword.isBlank()) {
+            error = "Enter a passcode"
             return
         }
-        if (walletName.isBlank()) {
-            error = "Enter a wallet name"
+        if (walletPassword != confirmPassword) {
+            error = "Passcodes do not match"
             return
         }
         connecting = true
         error = null
-        val cfg = TakerAppConfig(
-            rpcHost = rpcHost.trim(),
-            rpcPort = port,
-            rpcUsername = rpcUser,
-            rpcPassword = rpcPass,
-            zmqHost = zmqHost.trim(),
-            zmqPort = zPort,
-            torControlPort = cPort,
-            torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
-            torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
-            torAuthPassword = torAuth,
-            walletName = walletName.trim(),
-            walletPassword = walletPassword,
-            protocol = session.config.protocol,
+        val liveConfig = autoConfig.copy(
+            electrumUrl = TakerAppConfig.DEFAULT_ELECTRUM_URL,
+            torAuthPassword = TakerAppConfig.DEMO_TOR_PASSWORD,
         )
-        session.saveConfig(cfg, markLoggedIn = false)
+        session.saveConfig(liveConfig, markLoggedIn = false)
         scope.launch {
-            val result = repo.initTaker(session, forceReconnect = true)
+            val tor = TorManager.ensureRunning(context)
+            torStatus = tor.message
+            if (!tor.reachable) {
+                connecting = false
+                error = tor.message
+                return@launch
+            }
+            val result = withContext(Dispatchers.IO) {
+                repo.initTaker(session, forceReconnect = true, config = liveConfig)
+            }
             connecting = false
             result
                 .onSuccess {
-                    session.saveConfig(cfg, markLoggedIn = true)
+                    session.saveConfig(liveConfig, markLoggedIn = true)
                     onConnected()
                 }
                 .onFailure { e ->
-                    error = e.message ?: "Taker.init failed"
+                    error = e.message ?: "Wallet setup failed"
                 }
         }
     }
@@ -182,8 +171,6 @@ fun LoginScreen(onConnected: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Text("COINSWAP", style = MaterialTheme.typography.titleMedium, color = TextPrimary, letterSpacing = 4.sp)
-            Spacer(Modifier.height(6.dp))
-            Text("Taker setup", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
 
             Spacer(Modifier.height(28.dp))
 
@@ -196,55 +183,8 @@ fun LoginScreen(onConnected: () -> Unit) {
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Bitcoin Core RPC", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Button(
-                        onClick = {
-                            rpcPort = TakerAppConfig.SIGNET_RPC_PORT.toString()
-                            zmqPort = TakerAppConfig.DEFAULT_ZMQ_PORT.toString()
-                        },
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Surface),
-                    ) {
-                        Text("Signet ports", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
-                    }
-                    Button(
-                        onClick = {
-                            rpcPort = TakerAppConfig.REGTEST_RPC_PORT.toString()
-                            zmqPort = TakerAppConfig.DEFAULT_ZMQ_PORT.toString()
-                        },
-                        modifier = Modifier.weight(1f).height(40.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Surface),
-                    ) {
-                        Text("Regtest ports", color = TextPrimary, style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                Field("RPC host", rpcHost, { rpcHost = it }, KeyboardType.Uri)
-                Field("RPC port", rpcPort, { rpcPort = it.filter(Char::isDigit) }, KeyboardType.Number)
-                Field("RPC username", rpcUser, { rpcUser = it })
-                PasswordField("RPC password", rpcPass, { rpcPass = it }, showPwd) { showPwd = !showPwd }
-
-                Text("ZMQ", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Field("ZMQ host", zmqHost, { zmqHost = it }, KeyboardType.Uri)
-                Field("ZMQ port", zmqPort, { zmqPort = it.filter(Char::isDigit) }, KeyboardType.Number)
-
-                Text("Tor", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Text(
-                    "SOCKS ${TakerAppConfig.DEFAULT_SOCKS_HOST}:${TakerAppConfig.DEFAULT_SOCKS_PORT}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary,
-                )
-                Field("Control port", torControl, { torControl = it.filter(Char::isDigit) }, KeyboardType.Number)
-                PasswordField("Tor auth password (optional)", torAuth, { torAuth = it }, showPwd) { showPwd = !showPwd }
-
-                Text("Wallet", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
-                Field("Wallet name", walletName, { walletName = it })
-                PasswordField("Wallet password", walletPassword, { walletPassword = it }, showPwd) { showPwd = !showPwd }
+                PasswordField("Passcode", walletPassword, { walletPassword = it }, showPwd) { showPwd = !showPwd }
+                PasswordField("Confirm", confirmPassword, { confirmPassword = it }, showPwd) { showPwd = !showPwd }
 
                 error?.let { msg ->
                     Box(
@@ -270,36 +210,11 @@ fun LoginScreen(onConnected: () -> Unit) {
                         CircularProgressIndicator(Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
                         Spacer(Modifier.width(10.dp))
                     }
-                    Text(if (connecting) "Initializing taker…" else "Continue", color = Color.Black)
+                    Text(if (connecting) "Opening…" else "Continue", color = Color.Black)
                 }
             }
             Spacer(Modifier.height(24.dp))
         }
-    }
-
-    OrbotInstallDialog(
-        visible = showOrbotDialog,
-        onDismiss = { showOrbotDialog = false },
-    )
-}
-
-@Composable
-private fun Field(
-    label: String,
-    value: String,
-    onChange: (String) -> Unit,
-    keyboard: KeyboardType = KeyboardType.Text,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onChange,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-            colors = coinswapTextFieldColors(),
-        )
     }
 }
 

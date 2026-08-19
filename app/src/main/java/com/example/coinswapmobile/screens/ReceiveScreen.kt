@@ -31,7 +31,7 @@ private fun networkHint(address: String?, rpcLabel: String): String {
         address?.startsWith("bcrt1") == true -> "Regtest"
         address?.startsWith("tb1") == true -> "Testnet / signet"
         address?.startsWith("bc1") == true -> "Mainnet"
-        rpcLabel.contains("18442") -> "Regtest"
+        rpcLabel.contains("50001") || rpcLabel.contains("18442") -> "Regtest"
         rpcLabel.contains("38332") -> "Signet"
         else -> rpcLabel.ifBlank { "Bitcoin" }
     }
@@ -40,6 +40,7 @@ private fun networkHint(address: String?, rpcLabel: String): String {
 @Composable
 fun ReceiveScreen(
     onBack: () -> Unit,
+    showHeader: Boolean = true,
     walletViewModel: WalletViewModel = viewModel(),
 ) {
     val uiState by walletViewModel.uiState.collectAsState()
@@ -53,18 +54,20 @@ fun ReceiveScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
+        if (showHeader) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = TextPrimary)
+                }
+                Text("Receive",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary)
             }
-            Text("Receive",
-                style = MaterialTheme.typography.titleMedium,
-                color = TextPrimary)
         }
 
         Column(

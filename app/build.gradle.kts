@@ -20,6 +20,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Optional: gradlew assembleDebug -PdemoRegtestHost=203.0.113.10
+        // Host of electrs (Electrum TCP 50001). No Bitcoin Core RPC.
         buildConfigField("String", "DEMO_REGTEST_HOST", "\"$demoRegtestHost\"")
 
         // Official ARM64 UniFFI .so from coinswap-ffi
@@ -101,6 +102,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    // 0.4.8+/0.4.9+ need newer Kotlin / compileSdk than this app.
+    implementation("info.guardianproject:tor-android:0.4.7.14")
+    implementation("info.guardianproject:jtorctl:0.4.5.7")
+    // tor-android 0.4.7 uses LocalBroadcastManager, which is no longer bundled in AndroidX.
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
     // Decode core-lib swap_tracker.cbor (same source taker-app polls for live phases)
     implementation("com.upokecenter:cbor:4.5.3") {
         exclude(group = "com.github.peteroupc", module = "datautilities")

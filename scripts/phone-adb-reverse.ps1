@@ -1,5 +1,5 @@
-# Forward phone localhost ports to PC backend (bitcoind + Tor for login/markets).
-# Tor uses relay ports 19050/19051 on PC (see wsl-setup-tor-for-phone.sh).
+# Forward only Electrum (electrs :50001) from the phone to the PC.
+# Do NOT reverse Tor. The app runs its own Tor on 127.0.0.1:9050 / 9051.
 param(
     [string]$Device = "",
     [switch]$StopOrbot
@@ -35,23 +35,18 @@ if ($StopOrbot) {
     Write-Host "Stopping Orbot..."
     & adb @adbArgs shell am force-stop org.torproject.android
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Orbot force-stop failed or package missing (exit $LASTEXITCODE). Continuing with adb reverse."
+        Write-Warning "Orbot force-stop failed or package missing (exit $LASTEXITCODE). Continuing."
     }
     Start-Sleep -Seconds 2
 }
 
-Write-Host "Setting adb reverse on $Device ..."
-Invoke-AdbRequired -CommandArgs @("reverse", "tcp:18442", "tcp:18442")
-Invoke-AdbRequired -CommandArgs @("reverse", "tcp:28332", "tcp:28332")
-Invoke-AdbRequired -CommandArgs @("reverse", "tcp:38332", "tcp:38332")
-# Removals may fail if nothing was mapped - ignore (don't trip $ErrorActionPreference Stop).
-$prevEap = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& adb @adbArgs reverse --remove tcp:9050 2>$null | Out-Null
-& adb @adbArgs reverse --remove tcp:9051 2>$null | Out-Null
-$ErrorActionPreference = $prevEap
+Write-Host "Forwarding electrs + maker SOCKS mapper + docker Tor control"
+Invoke-AdbRequired -CommandArgs @("reverse", "tcp:50001", "tcp:50001")
+# Phone Taker always uses 9050. Map it to the local onion->TCP proxy, not Docker Tor.
 Invoke-AdbRequired -CommandArgs @("reverse", "tcp:9050", "tcp:19050")
-Invoke-AdbRequired -CommandArgs @("reverse", "tcp:9051", "tcp:19051")
+Invoke-AdbRequired -CommandArgs @("reverse", "tcp:9051", "tcp:9051")
 
 Write-Host ""
 Invoke-AdbRequired -CommandArgs @("reverse", "--list")
+Write-Host ""
+Write-Host "Phone 50001 -> electrs. Phone 9050 -> maker-direct-socks :19050. Phone 9051 -> coinswap-tor."
