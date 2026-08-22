@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotRequiredDialog
 import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.ui.theme.*
@@ -60,6 +62,12 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
         }
     }
 
+    OrbotRequiredDialog(
+        visible = vmState.showOrbotPrompt,
+        reason = vmState.orbotPromptReason,
+        onDismiss = { marketsViewModel.dismissOrbotPrompt() },
+    )
+
     if (selectedMaker != null) {
         ModalBottomSheet(
             onDismissRequest = { selectedMaker = null },
@@ -96,7 +104,19 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
 
         if (!vmState.torReachable) {
             item {
-                TorPromptBanner(onRetryClick = { retryTorThenSync() })
+                TorPromptBanner(
+                    onAction = {
+                        scope.launch {
+                            TorManager.ensureRunning(context)
+                            marketsViewModel.refreshTorStatus()
+                            if (!OrbotHelper.isOrbotInstalled(context)) {
+                                marketsViewModel.promptOrbotFromUi(
+                                    "Install Orbot to reach makers over Tor.",
+                                )
+                            }
+                        }
+                    },
+                )
             }
         }
         item {

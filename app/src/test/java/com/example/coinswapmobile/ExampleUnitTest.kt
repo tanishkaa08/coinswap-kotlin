@@ -1,11 +1,15 @@
 package com.example.coinswapmobile
 
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerAppConfig
+import com.example.coinswapmobile.data.toBackendConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * Pure wallet-contract checks that do not need an Android device or UniFFI.
@@ -25,6 +29,12 @@ class WalletContractTest {
         assertEquals("demo-wallet", cfg.walletName)
         val onion = cfg.copy(electrumUrl = "tcp://abcd.onion:50001")
         assertEquals("127.0.0.1:9050", onion.electrumSocks5)
+        val loopback = cfg.copy(electrumUrl = TakerAppConfig.DEFAULT_ELECTRUM_URL)
+        assertEquals(null, loopback.electrumSocks5)
+        val signet = cfg.copy(electrumUrl = TakerAppConfig.SIGNET_ELECTRUM_URL)
+        assertEquals(null, signet.electrumSocks5)
+        assertNull(signet.toBackendConfig().socks5)
+        assertEquals("127.0.0.1:9050", cfg.torSocksEndpoint)
         val copy = cfg.copy()
         assertEquals(cfg.walletPassword, copy.walletPassword)
         assertEquals(cfg.torAuthPassword, copy.torAuthPassword)
@@ -69,6 +79,20 @@ class WalletContractTest {
             "ssl://electrum.example:50002",
             TakerAppConfig.electrumUrlForHost("ssl://electrum.example:50002"),
         )
+        assertEquals(
+            "ssl://electrum.citadelfoss.xyz:50002",
+            TakerAppConfig.electrumUrlForHost("electrum.citadelfoss.xyz:50002"),
+        )
+        assertEquals(
+            "tcp://electrum.citadelfoss.xyz:50001",
+            TakerAppConfig.electrumUrlForHost("electrum.citadelfoss.xyz:50001:t"),
+        )
+        assertEquals(
+            "ssl://electrum.citadelfoss.xyz:50002",
+            TakerAppConfig.electrumUrlForHost("electrum.citadelfoss.xyz:50002:s"),
+        )
+        assertEquals("taker-signet", TakerAppConfig.walletNameForElectrum(TakerAppConfig.SIGNET_ELECTRUM_URL))
+        assertEquals("taker-wallet", TakerAppConfig.walletNameForElectrum(TakerAppConfig.DEFAULT_ELECTRUM_URL))
     }
 
     @Test
@@ -127,5 +151,48 @@ class WalletContractTest {
                 amountSats = 200_000,
             ),
         )
+    }
+
+    @Test
+    fun maxAmountFittingMakerCount_capsUseMaxToSharedMakerLiquidity() {
+        val makers = listOf(
+            Triple(true, 100_000L, 300_000L),
+            Triple(true, 100_000L, 250_000L),
+            Triple(true, 100_000L, 800_000L),
+            Triple(false, 100_000L, 900_000L),
+        )
+        // Wallet could send 700k; 2 online makers can share up to 300k
+        // (300k + 800k caps; the 250k maker drops out above 250k).
+        assertEquals(
+            300_000L,
+            CoinswapRepository.maxAmountFittingMakerCount(
+                walletCap = 700_000L,
+                needed = 2,
+                makers = makers,
+            ),
+        )
+        assertEquals(
+            0L,
+            CoinswapRepository.maxAmountFittingMakerCount(
+                walletCap = 700_000L,
+                needed = 4,
+                makers = makers,
+            ),
+        )
+    }
+
+    @Test
+    fun walletExists_onlyMatchesExactWalletFile() {
+        val dir = File.createTempFile("taker", "dir").apply {
+            delete()
+            mkdirs()
+            deleteOnExit()
+        }
+        val wallets = File(dir, "wallets").apply { mkdirs() }
+        File(wallets, "taker-signet_swap_report.json").writeText("{}")
+        assertFalse(FfiEnv.walletExists(dir.absolutePath, "taker-signet"))
+        File(wallets, "taker-signet").writeText("wallet")
+        assertTrue(FfiEnv.walletExists(dir.absolutePath, "taker-signet"))
+        assertFalse(FfiEnv.walletExists(dir.absolutePath, ""))
     }
 }

@@ -18,7 +18,11 @@ import java.util.concurrent.TimeUnit
 class MarketRepository(
     private val coinswap: CoinswapRepository,
 ) {
-    suspend fun syncOfferbookAndWait(): Result<Unit> = coinswap.syncOfferbook()
+    suspend fun syncOfferbookAndWait(forceClearCache: Boolean = false): Result<Unit> =
+        coinswap.syncOfferbook(forceClearCache = forceClearCache)
+
+    /** Drop offerbook backoff so the next poll retries every discovered maker. */
+    fun clearOfferbookCache() = coinswap.clearOfferbookCache()
 
     suspend fun fetchOffers(): Result<List<SwapMaker>> =
         coinswap.listMakers().map { makers -> makers.map { it.toSwapMaker() } }

@@ -31,6 +31,7 @@ private fun networkHint(address: String?, rpcLabel: String): String {
         address?.startsWith("bcrt1") == true -> "Regtest"
         address?.startsWith("tb1") == true -> "Testnet / signet"
         address?.startsWith("bc1") == true -> "Mainnet"
+        rpcLabel.contains("citadelfoss") || rpcLabel.contains("50002") -> "Signet"
         rpcLabel.contains("50001") || rpcLabel.contains("18442") -> "Regtest"
         rpcLabel.contains("38332") -> "Signet"
         else -> rpcLabel.ifBlank { "Bitcoin" }
@@ -48,6 +49,12 @@ fun ReceiveScreen(
     var copied by remember { mutableStateOf(false) }
 
     val address = uiState.receiveAddress
+
+    LaunchedEffect(uiState.isInitialized) {
+        if (uiState.isInitialized && uiState.receiveAddress == null && uiState.error == null) {
+            walletViewModel.generateReceiveAddress()
+        }
+    }
 
     Column(
         modifier = Modifier

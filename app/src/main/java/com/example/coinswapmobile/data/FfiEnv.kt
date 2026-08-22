@@ -22,6 +22,13 @@ object FfiEnv {
         return dir.absolutePath
     }
 
+    /** True when `{dataDir}/wallets/{walletName}` already exists (returning user). */
+    fun walletExists(dataDir: String, walletName: String): Boolean {
+        if (walletName.isBlank()) return false
+        val file = File(File(dataDir, "wallets"), walletName)
+        return file.isFile || file.isDirectory
+    }
+
     fun ensureHome(homeDir: String) {
         try {
             Os.setenv("HOME", homeDir, true)

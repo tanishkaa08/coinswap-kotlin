@@ -70,6 +70,9 @@ class CoinswapRepository(
         session: UserSession,
         forceReconnect: Boolean = false,
         config: TakerAppConfig = session.config,
+        syncAfterInit: Boolean = true,
+        electrumSocks5: String? = config.electrumSocks5,
+        electrumTimeoutSecs: UByte = TakerAppConfig.DEFAULT_ELECTRUM_TIMEOUT_SECS,
     ): Result<WalletState> =
         TakerHolder.initMutex.withLock {
             if (TakerHolder.isInitialized && !forceReconnect) {
@@ -83,8 +86,11 @@ class CoinswapRepository(
                 require(cfg.torControlPort in 1..65535) {
                     "Tor control port must be 1..65535 (got ${cfg.torControlPort})"
                 }
-                // Drop any prior Taker before reconnecting so a failed init cannot
-                // leave the old backend live against a newly saved session config.
+                // Clearnet Electrum → null SOCKS. Onion Electrum → Orbot.
+                // Never force clearnet TLS through Tor (WouldBlock / unreachable).
+                val socks = electrumSocks5 ?: cfg.electrumSocks5
+                val liveTorPassword = TorManager.probeControlPassword()
+                    ?: cfg.torAuthPassword
                 TakerHolder.clear()
                 setupLogging(dataDir = appDataDir, level = "info", toStdout = false)
                 val taker = Taker.init(
@@ -92,23 +98,39 @@ class CoinswapRepository(
                     walletFileName = cfg.walletName,
                     rpcConfig = null,
                     controlPort = cfg.torControlPort.toUShort(),
-                    torAuthPassword = cfg.torAuthPassword.ifBlank { null },
+                    torAuthPassword = liveTorPassword.ifBlank { null },
                     zmqAddr = TakerAppConfig.DUMMY_ZMQ_ADDR,
                     password = cfg.walletPassword.ifBlank { null },
                     nostrRelays = null,
-                    backendConfig = cfg.toBackendConfig(),
+                    backendConfig = cfg.toBackendConfig(
+                        socks5 = socks,
+                        timeoutSecs = electrumTimeoutSecs.coerceAtLeast(
+                            TakerAppConfig.DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                        ),
+                        maxRetries = TakerAppConfig.DEFAULT_ELECTRUM_MAX_RETRIES,
+                    ),
                 )
                 try {
-                    try {
-                        taker.lockUnspendableUtxos()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        // Non-fatal: some wallets have nothing to lock.
+                    if (syncAfterInit) {
+                        try {
+                            taker.lockUnspendableUtxos()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                        }
+                        taker.syncAndSave()
                     }
-                    taker.syncAndSave()
-                    val state = snapshotWallet(taker)
-                    // Only publish after sync succeeds so callers never see a half-init Taker.
+                    val state = try {
+                        snapshotWallet(taker)
+                    } catch (_: Exception) {
+                        WalletState(
+                            balanceSats = 0,
+                            confirmedSats = 0,
+                            unconfirmedSats = 0,
+                            backend = "ELECTRUM",
+                            utxos = emptyList(),
+                        )
+                    }
                     TakerHolder.set(taker)
                     state
                 } catch (e: CancellationException) {
@@ -280,10 +302,7 @@ class CoinswapRepository(
             sendAmount = amountSats.toULong(),
             makerCount = makerCount.toUInt(),
             txCount = txCount.coerceAtLeast(1).toUInt(),
-            // 0: do not sit on maker sockets during the confirm wait. That wait
-            // kills the Tor/TCP route; the maker waits for confirmations itself
-            // after ProofOfFunding arrives.
-            requiredConfirms = 0u,
+            requiredConfirms = 1u, // maker also requires ≥1; send PoF after confirm so Tor isn't held open for the wait
             manuallySelectedOutpoints = outpoints,
             preferredMakers = makerIds.takeIf { it.isNotEmpty() },
         )
@@ -354,8 +373,8 @@ class CoinswapRepository(
     suspend fun recoverActiveSwap(swapId: String = ""): Result<String> =
         callFfiLong("recoverActiveSwap") {
             TakerHolder.require().recoverActiveSwap()
-            // Keep failure markers until funds are visibly swept; clearing them
-            // early skips Recovery on next launch while CSV timelock still holds coins.
+            // Fresh failure: force Recovery once. User may then dismiss to use spendable.
+            File(appDataDir, "recovery_use_spendable").delete()
             runCatching {
                 File(appDataDir, "recovery_in_progress").writeText(
                     "${System.currentTimeMillis()}\n$swapId",
@@ -378,7 +397,7 @@ class CoinswapRepository(
         Triple(fees.economy, fees.standard, fees.fastest)
     }
 
-    fun defaultElectrumHint(): String = TakerAppConfig.DEFAULT_ELECTRUM_URL
+    fun defaultElectrumHint(): String = TakerAppConfig.SIGNET_ELECTRUM_URL
 
     fun clearTaker() {
         TakerHolder.clear()
@@ -611,8 +630,7 @@ class CoinswapRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
-                Result.failure(IllegalStateException("$operation failed: $detail", e))
+                Result.failure(IllegalStateException(humanizeFfiError(operation, e), e))
             }
         }
 
@@ -630,10 +648,24 @@ class CoinswapRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
-                Result.failure(IllegalStateException("$operation failed: $detail", e))
+                Result.failure(IllegalStateException(humanizeFfiError(operation, e), e))
             }
         }
+
+    private fun humanizeFfiError(operation: String, e: Throwable): String {
+        val detail = e.message?.takeIf { it.isNotBlank() } ?: e.toString()
+        val lower = detail.lowercase()
+        return when {
+            lower.contains("security(decryption)") ||
+                lower.contains("security(desc") && lower.contains("decrypt") ||
+                (lower.contains("security") && lower.contains("decryption")) ->
+                "$operation failed: wrong passcode (wallet is encrypted)."
+            lower.contains("passwordrequired") ||
+                (lower.contains("security") && lower.contains("password")) ->
+                "$operation failed: this wallet needs its passcode."
+            else -> "$operation failed: $detail"
+        }
+    }
 
     companion object {
         /**
@@ -661,6 +693,49 @@ class CoinswapRepository(
             if (maxSats > 0L && amountSats > maxSats) return false
             if (liquiditySats > 0L && amountSats > liquiditySats) return false
             return true
+        }
+
+        /**
+         * Largest amount ≤ [walletCap] that at least [needed] online makers can take.
+         * USE MAX must respect this or Swap will show "not enough eligible makers"
+         * even when Markets shows several online.
+         */
+        fun maxAmountFittingMakerCount(
+            walletCap: Long,
+            needed: Int,
+            makers: List<Triple<Boolean, Long, Long>>, // online, minSats, effectiveMax (0 = unlimited)
+        ): Long {
+            if (needed <= 0 || walletCap < MIN_SWAP_SATS) return 0L
+            val online = makers.filter { it.first }
+            if (online.size < needed) return 0L
+
+            fun fits(minSats: Long, maxSats: Long, amount: Long): Boolean {
+                if (amount < minSats) return false
+                if (maxSats > 0L && amount > maxSats) return false
+                return true
+            }
+
+            var lo = MIN_SWAP_SATS
+            var hi = walletCap
+            var best = 0L
+            while (lo <= hi) {
+                val mid = (lo + hi) ushr 1
+                val count = online.count { (_, minSats, maxSats) -> fits(minSats, maxSats, mid) }
+                if (count >= needed) {
+                    best = mid
+                    lo = mid + 1
+                } else {
+                    hi = mid - 1
+                }
+            }
+            return best
+        }
+
+        fun effectiveMakerMax(maxSats: Long, liquiditySats: Long): Long {
+            var cap = Long.MAX_VALUE
+            if (maxSats > 0L) cap = minOf(cap, maxSats)
+            if (liquiditySats > 0L) cap = minOf(cap, liquiditySats)
+            return if (cap == Long.MAX_VALUE) 0L else cap
         }
 
         /** Reject path traversal / separators before using swapId as a filename. */

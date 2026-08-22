@@ -1,0 +1,12 @@
+   Compiling coinswap v0.2.2 (D:\dev\coinswap-ffi\patched-coinswap)
+warning: unused variable: `swap_id`
+   --> D:\dev\coinswap-ffi\patched-coinswap\src\taker\taproot_swap.rs:711:13
+    |
+711 |         let swap_id = self.swap_state()?.id.clone();
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_swap_id`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `coinswap` (lib) generated 1 warning (run `cargo fix --lib -p coinswap` to apply 1 suggestion)
+   Compiling coinswap-ffi v0.1.0 (D:\dev\coinswap-ffi\ffi-commons)
+    Finished `release-smaller` profile [optimized] target(s) in 4m 51s

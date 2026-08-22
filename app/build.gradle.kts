@@ -8,7 +8,11 @@ android {
     namespace = "com.example.coinswapmobile"
     compileSdk = 35
 
-    val demoRegtestHost = (project.findProperty("demoRegtestHost") as? String)?.trim().orEmpty()
+    // Defaults to the public signet Electrum so the app runs with no PC-side lab.
+    // Override for a local regtest: gradlew assembleDebug -PelectrumUrl=tcp://10.0.0.5:50001
+    val electrumUrl = (project.findProperty("electrumUrl") as? String)?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "ssl://electrum.citadelfoss.xyz:50002"
 
     defaultConfig {
         applicationId = "com.example.coinswapmobile"
@@ -19,9 +23,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Optional: gradlew assembleDebug -PdemoRegtestHost=203.0.113.10
-        // Host of electrs (Electrum TCP 50001). No Bitcoin Core RPC.
-        buildConfigField("String", "DEMO_REGTEST_HOST", "\"$demoRegtestHost\"")
+        // Electrum endpoint (tcp:// or ssl://). No Bitcoin Core RPC.
+        buildConfigField("String", "ELECTRUM_URL", "\"$electrumUrl\"")
 
         // Official ARM64 UniFFI .so from coinswap-ffi
         ndk {
@@ -102,11 +105,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
-    // 0.4.8+/0.4.9+ need newer Kotlin / compileSdk than this app.
-    implementation("info.guardianproject:tor-android:0.4.7.14")
-    implementation("info.guardianproject:jtorctl:0.4.5.7")
-    // tor-android 0.4.7 uses LocalBroadcastManager, which is no longer bundled in AndroidX.
-    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
     // Decode core-lib swap_tracker.cbor (same source taker-app polls for live phases)
     implementation("com.upokecenter:cbor:4.5.3") {
         exclude(group = "com.github.peteroupc", module = "datautilities")

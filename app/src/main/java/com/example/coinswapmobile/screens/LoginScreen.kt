@@ -45,12 +45,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.coinswapmobile.BuildConfig
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotRequiredDialog
+import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.FfiEnv
 import com.example.coinswapmobile.data.TakerAppConfig
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
+import com.example.coinswapmobile.data.pickReachableElectrumUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.coinswapmobile.ui.theme.Background
@@ -69,7 +73,9 @@ fun LoginScreen(onConnected: () -> Unit) {
     val repo = remember { CoinswapRepository(FfiEnv.takerDataDir(context)) }
     val scope = rememberCoroutineScope()
     val initial = remember { session.config }
-    val demoHost = remember { BuildConfig.DEMO_REGTEST_HOST.trim() }
+    val configuredElectrum = remember {
+        BuildConfig.ELECTRUM_URL.trim().ifBlank { TakerAppConfig.SIGNET_ELECTRUM_URL }
+    }
 
     var walletPassword by remember { mutableStateOf(initial.walletPassword) }
     var confirmPassword by remember { mutableStateOf(initial.walletPassword) }
@@ -77,34 +83,27 @@ fun LoginScreen(onConnected: () -> Unit) {
     var connecting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var torStatus by remember { mutableStateOf("Starting Tor…") }
+    var torReachable by remember { mutableStateOf(false) }
+    var showOrbotDialog by remember { mutableStateOf(false) }
 
-    val autoConfig = remember(demoHost, initial, walletPassword) {
-        if (demoHost.isNotBlank()) {
-            TakerAppConfig(
-                electrumUrl = TakerAppConfig.electrumUrlForHost(demoHost),
-                torControlPort = initial.torControlPort,
-                torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
-                torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
-                torAuthPassword = TakerAppConfig.DEMO_TOR_PASSWORD,
-                walletName = TakerAppConfig.DEFAULT_WALLET_NAME,
-                walletPassword = walletPassword,
-                protocol = initial.protocol,
-            )
-        } else {
-            initial.copy(
-                walletName = TakerAppConfig.DEFAULT_WALLET_NAME,
-                walletPassword = walletPassword,
-            )
-        }
+    val autoConfig = remember(configuredElectrum, initial, walletPassword) {
+        TakerAppConfig(
+            electrumUrl = TakerAppConfig.electrumUrlForHost(configuredElectrum),
+            torControlPort = initial.torControlPort,
+            torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
+            torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
+            walletName = TakerAppConfig.walletNameForElectrum(configuredElectrum),
+            walletPassword = walletPassword,
+            protocol = initial.protocol,
+        )
     }
 
     LaunchedEffect(Unit) {
-        torStatus = "Starting Tor…"
-        val status = TorManager.ensureRunning(context)
-        torStatus = status.message
-        if (!status.reachable) {
-            error = status.message
-        }
+        torStatus = "Checking Orbot…"
+        val status = TorManager.ensureRunning(context, timeoutMs = 8_000L)
+        torReachable = status.reachable
+        torStatus = if (status.reachable) "ORBOT ACTIVE" else status.message
+        if (!status.reachable) showOrbotDialog = true
     }
 
     fun connect() {
@@ -118,22 +117,50 @@ fun LoginScreen(onConnected: () -> Unit) {
         }
         connecting = true
         error = null
-        val liveConfig = autoConfig.copy(
-            electrumUrl = TakerAppConfig.DEFAULT_ELECTRUM_URL,
-            torAuthPassword = TakerAppConfig.DEMO_TOR_PASSWORD,
-        )
-        session.saveConfig(liveConfig, markLoggedIn = false)
+        torStatus = "Checking Orbot…"
         scope.launch {
-            val tor = TorManager.ensureRunning(context)
-            torStatus = tor.message
+            val tor = TorManager.ensureRunning(context, timeoutMs = 20_000L)
+            torReachable = tor.reachable
             if (!tor.reachable) {
                 connecting = false
                 error = tor.message
+                showOrbotDialog = true
                 return@launch
             }
-            val result = withContext(Dispatchers.IO) {
-                repo.initTaker(session, forceReconnect = true, config = liveConfig)
+
+            torStatus = "Probing Electrum…"
+            val (reachableUrl, probeErr) = withContext(Dispatchers.IO) {
+                pickReachableElectrumUrl(autoConfig.electrumUrl)
             }
+            if (probeErr != null) {
+                connecting = false
+                error = probeErr
+                return@launch
+            }
+            val liveConfig = autoConfig.copy(
+                electrumUrl = reachableUrl,
+                walletName = TakerAppConfig.walletNameForElectrum(reachableUrl),
+                torAuthPassword = tor.controlPassword.orEmpty(),
+            )
+            session.saveConfig(liveConfig, markLoggedIn = false)
+            torStatus = if (liveConfig.electrumSocks5 != null) {
+                "Connecting Electrum via Orbot…"
+            } else {
+                "Connecting Electrum (clearnet)…"
+            }
+
+            // Clearnet signet Electrum goes direct; .onion Electrum uses Orbot SOCKS.
+            val result = withContext(Dispatchers.IO) {
+                repo.initTaker(
+                    session,
+                    forceReconnect = true,
+                    config = liveConfig,
+                    syncAfterInit = false,
+                    electrumSocks5 = liveConfig.electrumSocks5,
+                    electrumTimeoutSecs = TakerAppConfig.DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                )
+            }
+
             connecting = false
             result
                 .onSuccess {
@@ -171,8 +198,31 @@ fun LoginScreen(onConnected: () -> Unit) {
             }
             Spacer(Modifier.height(20.dp))
             Text("COINSWAP", style = MaterialTheme.typography.titleMedium, color = TextPrimary, letterSpacing = 4.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Signet · ${configuredElectrum.removePrefix("ssl://").removePrefix("tcp://")}",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+            )
 
             Spacer(Modifier.height(28.dp))
+
+            if (!torReachable) {
+                TorPromptBanner(
+                    onAction = {
+                        scope.launch {
+                            torStatus = "Checking Orbot…"
+                            val status = TorManager.ensureRunning(context)
+                            torReachable = status.reachable
+                            torStatus = if (status.reachable) "ORBOT ACTIVE" else status.message
+                            if (!status.reachable && !OrbotHelper.isOrbotInstalled(context)) {
+                                showOrbotDialog = true
+                            }
+                        }
+                    },
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
 
             Column(
                 modifier = Modifier
@@ -212,9 +262,29 @@ fun LoginScreen(onConnected: () -> Unit) {
                     }
                     Text(if (connecting) "Opening…" else "Continue", color = Color.Black)
                 }
+                if (connecting) {
+                    Text(
+                        torStatus,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                    )
+                }
             }
             Spacer(Modifier.height(24.dp))
         }
+
+        OrbotRequiredDialog(
+            visible = showOrbotDialog,
+            reason = "Start Orbot with SocksPort 9050 before opening the wallet.",
+            onDismiss = { showOrbotDialog = false },
+            onOpened = {
+                scope.launch {
+                    val status = TorManager.ensureRunning(context)
+                    torReachable = status.reachable
+                    torStatus = if (status.reachable) "ORBOT ACTIVE" else status.message
+                }
+            },
+        )
     }
 }
 

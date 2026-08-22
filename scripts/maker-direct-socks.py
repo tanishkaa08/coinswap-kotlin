@@ -121,6 +121,8 @@ def park(dest: str, sock: socket.socket) -> None:
 def pipe(client: socket.socket, remote: socket.socket, dest: str | None) -> None:
     parked = False
     started = time.time()
+    tag = (dest or "?")[:12]
+    up = down = 0
     try:
         while True:
             r, _, _ = select.select([client, remote], [], [], 120)
@@ -128,7 +130,20 @@ def pipe(client: socket.socket, remote: socket.socket, dest: str | None) -> None
                 break
             for src in r:
                 data = src.recv(65536)
+                if data:
+                    if src is client:
+                        up += len(data)
+                    else:
+                        down += len(data)
                 if not data:
+                    # Which side hung up is the whole diagnosis when a swap phase
+                    # aborts: a maker EOF with bytes sent up means the maker
+                    # rejected the message, not that the relay dropped it.
+                    print(
+                        f"[{tag}] EOF from {'taker' if src is client else 'maker'}"
+                        f" after {time.time() - started:.2f}s up={up} down={down}",
+                        flush=True,
+                    )
                     # After the funding confirm wait the taker drops SOCKS and
                     # reconnects for ProofOfFunding. Park only those long-lived
                     # sockets; a negotiate close is too short and the maker TCP

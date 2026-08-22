@@ -29,11 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.OrbotRequiredDialog
 import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.data.CoinswapRepository
+import com.example.coinswapmobile.data.MakerRoutePrefs
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.service.SwapForegroundService
 import com.example.coinswapmobile.data.TorManager
@@ -94,6 +96,7 @@ fun SwapScreen(
     val context = LocalContext.current
     val vmState by swapViewModel.uiState.collectAsState()
     val scope = rememberCoroutineScope()
+    var showOrbotDialog by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -105,7 +108,7 @@ fun SwapScreen(
     }
 
     var amountSats by remember { mutableStateOf("") }
-    var networkFee by remember { mutableStateOf(NetworkFee.MEDIUM) }
+    var networkFee by remember { mutableStateOf(NetworkFee.HIGH) }
     var swapState by remember { mutableStateOf(SwapState.IDLE) }
 
     val allMakers = vmState.makers
@@ -120,14 +123,31 @@ fun SwapScreen(
         when {
             vmState.lastSwapId != null && !vmState.isSwapping && vmState.swapError == null ->
                 swapState = SwapState.DONE
+            // Stay on overlay so user can Recover / Done; failed is derived from swapError.
             !vmState.isSwapping && vmState.swapError != null && swapState == SwapState.IN_PROGRESS -> Unit
+        }
+    }
+
+    // If ViewModel cleared error while overlay was open after a soft cancel, drop overlay.
+    LaunchedEffect(vmState.swapError, vmState.isSwapping, vmState.lastSwapId) {
+        if (swapState == SwapState.IN_PROGRESS &&
+            !vmState.isSwapping &&
+            vmState.swapError == null &&
+            vmState.lastSwapId == null
+        ) {
+            swapState = SwapState.IDLE
         }
     }
 
     val amountSatsLong = amountSats.toLongOrNull() ?: 0L
     val makerCount = FIXED_MAKER_COUNT
     val txCount = FIXED_TX_COUNT
-    val eligibleMakers = allMakers.filter {
+    // Match ViewModel: only hard-excludes are hidden; soft demotes still show as online.
+    val routeableMakers = allMakers.filter {
+        !MakerRoutePrefs.isHardExcluded(it.onionAddress)
+    }
+    val onlineMakers = routeableMakers.filter { it.online }
+    val eligibleMakers = routeableMakers.filter {
         CoinswapRepository.makerFitsAmount(
             online = it.online,
             minSats = it.minSats,
@@ -137,6 +157,20 @@ fun SwapScreen(
         )
     }
     val selectedMakers = eligibleMakers.take(makerCount)
+    val autoBestPool = maxOf(regularTotal, swapTotal)
+    val walletCap = CoinswapRepository.maxSwappableSats(autoBestPool)
+    val makerCappedMax = CoinswapRepository.maxAmountFittingMakerCount(
+        walletCap = walletCap,
+        needed = makerCount,
+        makers = routeableMakers.map { m ->
+            Triple(
+                m.online,
+                m.minSats,
+                CoinswapRepository.effectiveMakerMax(m.maxSats, m.liquiditySats),
+            )
+        },
+    )
+    val swappableSats = if (makerCappedMax > 0L) minOf(walletCap, makerCappedMax) else walletCap
     val feePerMakerSats = if (selectedMakers.isNotEmpty()) {
         selectedMakers.sumOf { m ->
             m.baseFee + ((amountSatsLong * m.feeRatePct) / 100.0).toLong()
@@ -156,8 +190,6 @@ fun SwapScreen(
     val totalFeeSats     = totalSwapFeeSats + miningFeeSats
     val receiveAmtSats   = amountSatsLong - totalFeeSats
 
-    val autoBestPool = maxOf(regularTotal, swapTotal)
-    val swappableSats = CoinswapRepository.maxSwappableSats(autoBestPool)
     val estimatedMinutes = makerCount * 10
 
     Column(
@@ -211,7 +243,7 @@ fun SwapScreen(
 
         if (!vmState.torReachable) {
             TorPromptBanner(
-                onRetryClick = {
+                onAction = {
                     scope.launch {
                         TorManager.ensureRunning(context)
                         swapViewModel.loadWalletData()
@@ -264,8 +296,9 @@ fun SwapScreen(
 
         SectionCard {
             SectionLabel("ROUTE")
-            SummaryRow("Makers", "$makerCount")
-            SummaryRow("Eligible now", "${eligibleMakers.size}")
+            SummaryRow("Makers needed", "$makerCount")
+            SummaryRow("Online now", "${onlineMakers.size}")
+            SummaryRow("Fit this amount", "${eligibleMakers.size}")
         }
 
         SectionCard {
@@ -306,8 +339,16 @@ fun SwapScreen(
             vmState.isSwapping -> "A swap is already running"
             amountSatsLong <= 0 -> "Enter an amount"
             amountSatsLong < CoinswapRepository.MIN_SWAP_SATS -> "Minimum 100,000 sats"
+            onlineMakers.size < makerCount ->
+                "Need $makerCount online makers (Markets shows ${onlineMakers.size}). Sync Markets first."
             eligibleMakers.size < makerCount ->
-                "Not enough makers (${eligibleMakers.size}/${makerCount})"
+                "Need $makerCount makers that accept this amount " +
+                    "(${eligibleMakers.size} fit, ${onlineMakers.size} online). " +
+                    if (swappableSats > 0L && amountSatsLong > swappableSats) {
+                        "Try USE MAX (%,d sats) or a smaller amount.".format(swappableSats)
+                    } else {
+                        "Try a smaller amount or USE MAX."
+                    }
             !fundsOk ->
                 "Need ${formatSats(amountSatsLong + CoinswapRepository.SWAP_PREPARE_RESERVE_SATS)} sats in one coin pool (includes fee reserve)"
             receiveAmtSats <= 0L -> "Fees exceed swap amount"
@@ -374,6 +415,7 @@ fun SwapScreen(
             receiveSats   = if (receiveAmtSats > 0) receiveAmtSats else 0L,
             manualCoins   = 0,
             onConfirm     = {
+                swapViewModel.clearSwapResult()
                 swapState = SwapState.IN_PROGRESS
                 swapViewModel.beginSwap(
                     amountSats      = amountSatsLong,
@@ -416,6 +458,15 @@ fun SwapScreen(
             }
         )
     }
+
+    OrbotRequiredDialog(
+        visible = showOrbotDialog,
+        reason = "Keep Orbot running with SocksPort 9050. All traffic uses Orbot only.",
+        onDismiss = { showOrbotDialog = false },
+        onOpened = {
+            scope.launch { swapViewModel.loadWalletData() }
+        },
+    )
 }
 
 @Composable

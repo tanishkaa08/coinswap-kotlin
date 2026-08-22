@@ -15,7 +15,8 @@ Compose UI
 ```
 
 The wallet talks to an Electrum server. Bitcoin Core RPC and ZMQ are not used by this app.
-Maker discovery still goes over the in-app Tor daemon.
+Maker discovery and swaps use **Orbot** SOCKS on `127.0.0.1:9050` (no in-app Tor).
+Enable Orbot’s “Open Proxy on Localhost” so port 9050 is available.
 
 ## Native bindings
 
@@ -54,12 +55,13 @@ Taker.init(
     nostrRelays = null,
     backendConfig = BackendConfig(
         kind = "electrum",
-        url = "tcp://<electrs-host>:50001",
+        url = "ssl://electrum.citadelfoss.xyz:50002", // Neo VPS signet (TLS)
+        // Plaintext fallback: tcp://electrum.citadelfoss.xyz:50001
         username = null,
         password = null,
         walletName = null,
         zmqAddr = null,
-        socks5 = null, // set only for .onion Electrum URLs
+        socks5 = null, // clearnet Electrum — set only for .onion Electrum URLs
         timeout = null,
         pollIntervalSecs = null,
         maxRetries = null,
@@ -67,5 +69,6 @@ Taker.init(
 )
 ```
 
-Pass `-PdemoRegtestHost=<lan-ip>` so the app targets your electrs instance (`tcp://<lan-ip>:50001`).
-The live instance is kept in `TakerHolder`.
+Pass `-PelectrumUrl=ssl://electrum.citadelfoss.xyz:50002` (default) or a local
+`tcp://<lan-ip>:50001` for regtest. The live instance is kept in `TakerHolder`.
+Clearnet Electrum connects directly; makers still use Orbot SOCKS on `9050`.

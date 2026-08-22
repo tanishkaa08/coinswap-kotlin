@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.coinswapmobile.data.CoinswapRepository
 import com.example.coinswapmobile.data.FfiEnv
+import com.example.coinswapmobile.data.TakerAppConfig
 import com.example.coinswapmobile.data.TakerHolder
 import com.example.coinswapmobile.data.TorManager
 import com.example.coinswapmobile.data.UserSession
@@ -69,7 +70,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Initialize / reconnect the wallet session. Tor SOCKS is soft-checked only. */
+    /** Initialize / reconnect the wallet. Remote Electrum needs Tor SOCKS first. */
     fun connectWallet(forceReconnect: Boolean = false) {
         if (!session.isLoggedIn) return
         if (SwapExecutionBus.active.value) return
@@ -89,19 +90,29 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
                     torStatusMessage = tor.message,
                 )
             }
-            // Wallet connect works without Tor; warn but still init (markets/swaps need Tor later).
-            repo.initTaker(session, forceReconnect = forceReconnect)
+            // Wallet connect needs Orbot SOCKS so Electrum DNS works under VPN.
+            if (!tor.reachable) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = tor.message,
+                    )
+                }
+                return@launch
+            }
+            repo.initTaker(
+                session,
+                forceReconnect = forceReconnect,
+                electrumSocks5 = cfg.electrumSocks5,
+                electrumTimeoutSecs = TakerAppConfig.DEFAULT_ELECTRUM_TIMEOUT_SECS,
+            )
                 .onSuccess { state ->
                     _uiState.update {
                         it.applyState(state, cfg.electrumUrl, cfg.walletName)
                             .copy(
                                 isLoading = false,
                                 isInitialized = true,
-                                error = if (!tor.reachable) {
-                                    "Tor unreachable."
-                                } else {
-                                    null
-                                },
+                                error = null,
                             )
                     }
                 }

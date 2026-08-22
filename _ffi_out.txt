@@ -1,0 +1,10 @@
+=== building aarch64-linux-android ===
+=== staged D:\dev\coinswap-ffi\coinswap-kotlin\lib\src\main\jniLibs\arm64-v8a\libcoinswap_ffi.so ===
+
+
+FullName      : D:\dev\coinswap-ffi\coinswap-kotlin\lib\src\main\jniLibs\arm64-v8a\libcoinswap_ffi.so
+Length        : 14274496
+LastWriteTime : 21-08-2026 15:13:23
+
+
+

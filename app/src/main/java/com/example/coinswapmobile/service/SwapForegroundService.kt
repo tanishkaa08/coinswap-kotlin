@@ -156,10 +156,11 @@ class SwapForegroundService : Service() {
             return
         }
         if (userCancelled) {
+            // Soft cancel before native start — not a maker demotion event (no swapId).
             SwapExecutionBus.emit(
                 SwapExecutionBus.Event(
                     swapId = null,
-                    phase = "Stopped",
+                    phase = null,
                     isRunning = false,
                     failed = true,
                     errorMessage = "Swap stopped",

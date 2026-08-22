@@ -24,8 +24,7 @@ class UserSession(context: Context) {
                 torSocksHost = TakerAppConfig.DEFAULT_SOCKS_HOST,
                 torSocksPort = TakerAppConfig.DEFAULT_SOCKS_PORT,
                 torAuthPassword = secrets.getString(KEY_TOR_AUTH, "") ?: "",
-                walletName = prefs.getString(KEY_WALLET_NAME, TakerAppConfig.DEFAULT_WALLET_NAME)
-                    ?: TakerAppConfig.DEFAULT_WALLET_NAME,
+                walletName = TakerAppConfig.walletNameForElectrum(storedElectrumUrl()),
                 walletPassword = secrets.getString(KEY_WALLET_PASSWORD, "") ?: "",
                 protocol = prefs.getString(KEY_PROTOCOL, TakerAppConfig.DEFAULT_PROTOCOL)
                     ?: TakerAppConfig.DEFAULT_PROTOCOL,
@@ -97,12 +96,12 @@ class UserSession(context: Context) {
 
     private fun storedElectrumUrl(): String {
         val saved = prefs.getString(KEY_ELECTRUM_URL, null)?.trim().orEmpty()
-        if (saved.isNotEmpty()) return saved
+        if (saved.isNotEmpty() && !TakerAppConfig.isLoopbackElectrum(saved)) return saved
         val legacyHost = prefs.getString(KEY_RPC_HOST, null)?.trim().orEmpty()
-        if (legacyHost.isNotEmpty()) {
+        if (legacyHost.isNotEmpty() && !TakerAppConfig.isLoopbackElectrum(legacyHost)) {
             return TakerAppConfig.electrumUrlForHost(legacyHost)
         }
-        return TakerAppConfig.DEFAULT_ELECTRUM_URL
+        return TakerAppConfig.SIGNET_ELECTRUM_URL
     }
 
     /** One-time move of plaintext secrets from prefs → EncryptedSharedPreferences. */
@@ -148,16 +147,21 @@ class UserSession(context: Context) {
         private const val KEY_LOGGED_IN = "logged_in"
 
         private fun openSecretsPrefs(context: Context): SharedPreferences {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            return EncryptedSharedPreferences.create(
-                context,
-                SECRETS_PREFS_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
+            return try {
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    context,
+                    SECRETS_PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            } catch (_: Exception) {
+                // Keyset can be lost after backup/restore. Do not crash login.
+                context.getSharedPreferences("${SECRETS_PREFS_NAME}_fallback", Context.MODE_PRIVATE)
+            }
         }
 
         fun isLoggedIn(context: Context): Boolean = UserSession(context).isLoggedIn

@@ -43,6 +43,7 @@ data class SwapRecoveryInfo(
 
 object SwapRecovery {
     private val SWAP_FILES = listOf("swap.json", "swap_state.json")
+    private const val USE_SPENDABLE_MARKER = "recovery_use_spendable"
 
     fun readSwapState(context: Context): SwapRecoveryInfo? {
         val dir = FfiEnv.takerDataDir(context)
@@ -73,7 +74,25 @@ object SwapRecovery {
         return null
     }
 
-    fun isFailedSwap(context: Context): Boolean = readSwapState(context)?.failed == true
+    /** True when a failed swap still needs the Recovery screen (not dismissed for spendable use). */
+    fun isFailedSwap(context: Context): Boolean {
+        val dir = FfiEnv.takerDataDir(context)
+        if (File(dir, USE_SPENDABLE_MARKER).exists()) return false
+        return readSwapState(context)?.failed == true
+    }
+
+    /** Let the user keep swapping with unlocked coins while CSV recovery continues in-process. */
+    fun allowSpendableWhileRecovering(context: Context) {
+        val dir = FfiEnv.takerDataDir(context)
+        runCatching {
+            File(dir, USE_SPENDABLE_MARKER).writeText(System.currentTimeMillis().toString())
+        }
+        File(dir, "recovery_in_progress").delete()
+    }
+
+    fun clearSpendableBypass(context: Context) {
+        File(FfiEnv.takerDataDir(context), USE_SPENDABLE_MARKER).delete()
+    }
 }
 
 private const val GITHUB_ISSUE_URL = "https://github.com/citadel-tech/coinswap/issues/new/choose"
@@ -95,7 +114,22 @@ fun RecoveryScreen(
     val swapRepo = remember { SwapRepository(repo) }
     val session = remember { UserSession(context) }
 
-    BackHandler(enabled = uiState == RecoveryUiState.InProgress) { }
+    var spendableSats by remember { mutableStateOf(0L) }
+    var lockedSats by remember { mutableStateOf(0L) }
+
+    fun leaveWithSpendable() {
+        SwapRecovery.allowSpendableWhileRecovering(context)
+        onAbandon()
+    }
+
+    // Allow leaving once recovery has been kicked off (or failed) — don't trap on CSV wait.
+    BackHandler(enabled = uiState != RecoveryUiState.InProgress || spendableSats > 0L) {
+        if (uiState == RecoveryUiState.InProgress && spendableSats > 0L) {
+            leaveWithSpendable()
+        } else if (uiState != RecoveryUiState.InProgress) {
+            (onBack ?: onAbandon)()
+        }
+    }
 
     fun appendLog(line: String) { logs = logs + line }
 
@@ -104,6 +138,8 @@ fun RecoveryScreen(
         isRunning = true
         logs = emptyList()
         uiState = RecoveryUiState.InProgress
+        spendableSats = 0L
+        lockedSats = 0L
 
         appendLog("[recovery] Checking Tor SOCKS…")
         val tor = TorManager.checkSocks()
@@ -151,6 +187,9 @@ fun RecoveryScreen(
         val result = swapRepo.recoverActiveSwap(swapId)
         if (result.isFailure) {
             appendLog("[recovery] Error: ${result.exceptionOrNull()?.message}")
+            // Still allow exit if unlocked coins remain.
+            spendableSats = before?.balanceSats ?: 0L
+            lockedSats = before?.contractSats ?: 0L
             uiState = RecoveryUiState.Failed
             isRunning = false
             return
@@ -160,31 +199,49 @@ fun RecoveryScreen(
         val after = repo.getBalance().getOrNull()
         val lockedAfter = after?.contractSats ?: 0L
         val spendableAfter = after?.balanceSats ?: spendableBefore
+        spendableSats = spendableAfter
+        lockedSats = lockedAfter
+
         // Failed swaps from a previous regtest chain have outgoing swapcoins
         // whose funding txs are gone. Wallet contract balance stays 0; waiting
         // cannot reclaim them. Leave recovery so the user can swap again.
         if (lockedAfter == 0L && (before?.contractSats ?: 0L) == 0L) {
-            appendLog(
-                "[recovery] No locked contract coins on this chain (spendable=$spendableAfter). Nothing to wait for.",
-            )
-            repo.clearRecoveryMarker()
+            appendLog("[recovery] No locked contract coins on this chain.")
+            SwapRecovery.allowSpendableWhileRecovering(context)
             uiState = RecoveryUiState.Complete
             isRunning = false
+            onComplete()
             return
         }
 
-        var sawLocked = (before?.contractSats ?: 0L) > 0L
+        // Locked coins need CSV / confirms — reclaim in background; leave Recovery.
+        if (spendableAfter > 0L) {
+            appendLog("[recovery] Locked=$lockedAfter sats; continuing.")
+            SwapRecovery.allowSpendableWhileRecovering(context)
+            uiState = RecoveryUiState.Complete
+            isRunning = false
+            onComplete()
+            return
+        }
+
+        appendLog("[recovery] Waiting briefly for contract confirm/reclaim…")
+        var sawLocked = lockedAfter > 0L || (before?.contractSats ?: 0L) > 0L
         var reclaimed = false
-        var remaining = 120
+        var remaining = 24 // ~2 min max when nothing spendable
         while (remaining-- > 0) {
             val bal = repo.getBalance().getOrNull()
             val locked = bal?.contractSats ?: -1L
             val spendable = bal?.balanceSats ?: spendableBefore
+            spendableSats = spendable
+            lockedSats = locked.coerceAtLeast(0L)
             if (locked > 0L) sawLocked = true
-            if (spendable > spendableBefore + 50_000L) {
-                appendLog("[recovery] Spendable increased to $spendable sats")
-                reclaimed = true
-                break
+            if (spendable > 0L) {
+                appendLog("[recovery] Continuing.")
+                SwapRecovery.allowSpendableWhileRecovering(context)
+                uiState = RecoveryUiState.Complete
+                isRunning = false
+                onComplete()
+                return
             }
             if (sawLocked && locked == 0L) {
                 reclaimed = true
@@ -193,7 +250,7 @@ fun RecoveryScreen(
             if (locked > 0L) {
                 appendLog("[recovery] Waiting for locked coins… $locked sats")
             } else {
-                appendLog("[recovery] Waiting for reclaim… spendable=$spendable")
+                appendLog("[recovery] Waiting for reclaim…")
             }
             delay(5_000)
         }
@@ -205,9 +262,10 @@ fun RecoveryScreen(
             return
         }
 
-        repo.clearRecoveryMarker()
+        SwapRecovery.allowSpendableWhileRecovering(context)
         uiState = RecoveryUiState.Complete
         isRunning = false
+        onComplete()
     }
 
     LaunchedEffect(Unit) {
@@ -225,9 +283,16 @@ fun RecoveryScreen(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val canLeave = uiState != RecoveryUiState.InProgress
+            val canLeave = uiState != RecoveryUiState.InProgress || spendableSats > 0L
             IconButton(
-                onClick = { if (canLeave) (onBack ?: onAbandon)() },
+                onClick = {
+                    if (!canLeave) return@IconButton
+                    if (uiState == RecoveryUiState.InProgress && spendableSats > 0L) {
+                        leaveWithSpendable()
+                    } else {
+                        (onBack ?: onAbandon)()
+                    }
+                },
                 enabled = canLeave,
             ) {
                 Icon(
@@ -323,17 +388,15 @@ fun RecoveryScreen(
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = TorActive)
                     ) {
-                        Text("Continue to Home",
+                        Text(
+                            "Continue to Home",
                             color = androidx.compose.ui.graphics.Color.Black,
                             style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 RecoveryUiState.Failed -> {
                     Button(
-                        onClick = {
-                            repo.clearRecoveryMarker()
-                            onAbandon()
-                        },
+                        onClick = { leaveWithSpendable() },
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = TorActive)

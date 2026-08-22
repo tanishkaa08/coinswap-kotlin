@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.coinswapmobile.components.OrbotHelper
+import com.example.coinswapmobile.components.OrbotRequiredDialog
 import com.example.coinswapmobile.components.TorPromptBanner
 import com.example.coinswapmobile.components.TorStatusBadge
 import com.example.coinswapmobile.components.UtxoCard
@@ -54,6 +56,7 @@ fun HomeScreen(
     val session = remember { UserSession(context) }
     var currency by remember { mutableStateOf(session.displayCurrency) }
     val scope = rememberCoroutineScope()
+    var showOrbotDialog by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -82,13 +85,16 @@ fun HomeScreen(
             )
         }
 
-        if (uiState.isInitialized && !uiState.torReachable) {
+        if (!uiState.torReachable) {
             item {
                 TorPromptBanner(
-                    onRetryClick = {
+                    onAction = {
                         scope.launch {
                             TorManager.ensureRunning(context)
                             walletViewModel.refreshTorStatus()
+                            if (!OrbotHelper.isOrbotInstalled(context)) {
+                                showOrbotDialog = true
+                            }
                         }
                     },
                 )
@@ -130,6 +136,15 @@ fun HomeScreen(
             }
         }
     }
+
+    OrbotRequiredDialog(
+        visible = showOrbotDialog,
+        reason = "Start Orbot with SocksPort 9050 for maker and wallet traffic.",
+        onDismiss = { showOrbotDialog = false },
+        onOpened = {
+            scope.launch { walletViewModel.refreshTorStatus() }
+        },
+    )
 }
 
 @Composable
