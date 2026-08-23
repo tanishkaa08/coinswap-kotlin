@@ -200,7 +200,11 @@ fun LoginScreen(onConnected: () -> Unit) {
             Text("COINSWAP", style = MaterialTheme.typography.titleMedium, color = TextPrimary, letterSpacing = 4.sp)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Signet · ${configuredElectrum.removePrefix("ssl://").removePrefix("tcp://")}",
+                run {
+                    val host = configuredElectrum.removePrefix("ssl://").removePrefix("tcp://")
+                    val net = if (TakerAppConfig.isLoopbackElectrum(configuredElectrum)) "Regtest" else "Signet"
+                    "$net $host"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary,
             )
@@ -275,7 +279,7 @@ fun LoginScreen(onConnected: () -> Unit) {
 
         OrbotRequiredDialog(
             visible = showOrbotDialog,
-            reason = "Start Orbot with SocksPort 9050 before opening the wallet.",
+            reason = "Start Orbot with SocksPort 9050.",
             onDismiss = { showOrbotDialog = false },
             onOpened = {
                 scope.launch {

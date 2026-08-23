@@ -96,12 +96,18 @@ class UserSession(context: Context) {
 
     private fun storedElectrumUrl(): String {
         val saved = prefs.getString(KEY_ELECTRUM_URL, null)?.trim().orEmpty()
-        if (saved.isNotEmpty() && !TakerAppConfig.isLoopbackElectrum(saved)) return saved
+        if (saved.isNotEmpty()) return TakerAppConfig.electrumUrlForHost(saved)
         val legacyHost = prefs.getString(KEY_RPC_HOST, null)?.trim().orEmpty()
-        if (legacyHost.isNotEmpty() && !TakerAppConfig.isLoopbackElectrum(legacyHost)) {
+        if (legacyHost.isNotEmpty()) {
             return TakerAppConfig.electrumUrlForHost(legacyHost)
         }
-        return TakerAppConfig.SIGNET_ELECTRUM_URL
+        // No saved URL: follow the baked BuildConfig (regtest lab or public signet).
+        val baked = com.example.coinswapmobile.BuildConfig.ELECTRUM_URL.trim()
+        return if (baked.isNotEmpty()) {
+            TakerAppConfig.electrumUrlForHost(baked)
+        } else {
+            TakerAppConfig.SIGNET_ELECTRUM_URL
+        }
     }
 
     /** One-time move of plaintext secrets from prefs → EncryptedSharedPreferences. */

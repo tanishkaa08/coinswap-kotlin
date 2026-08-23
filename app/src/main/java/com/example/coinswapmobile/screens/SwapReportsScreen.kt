@@ -191,7 +191,7 @@ private fun SwapReportRow(report: SwapReport) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("${report.timeAgo}  •  ${report.duration}",
+            Text("${report.timeAgo} / ${report.duration}",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextSecondary)
         }

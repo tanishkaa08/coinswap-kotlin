@@ -105,21 +105,8 @@ fun OrbotRequiredDialog(
         },
         text = {
             Text(
-                buildString {
-                    append(
-                        reason?.takeIf { it.isNotBlank() }
-                            ?: "This app uses Orbot only for Tor (SocksPort 9050).",
-                    )
-                    append("\n\n")
-                    if (installed) {
-                        append(
-                            "Start Orbot Tor and enable “Open Proxy on Localhost” (SocksPort 9050), " +
-                                "then return here.",
-                        )
-                    } else {
-                        append("Install Orbot from the store, enable SocksPort 9050, then return here.")
-                    }
-                },
+                reason?.takeIf { it.isNotBlank() }
+                    ?: if (installed) "Start Orbot with SocksPort 9050." else "Install Orbot to continue.",
                 color = TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -179,11 +166,7 @@ fun TorPromptBanner(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            if (installed) {
-                "Orbot SOCKS not on 9050 — start Tor / local proxy"
-            } else {
-                "Orbot required — download to continue"
-            },
+            if (installed) "Orbot SOCKS not on 9050" else "Orbot required",
             color = TorInactive,
             style = MaterialTheme.typography.labelSmall,
         )

@@ -607,7 +607,7 @@ class CoinswapRepository(
         val lower = raw.lowercase()
         return when {
             lower.contains("fill whole buffer") || lower.contains("unexpectedeof") ->
-                "Maker Tor connection dropped. Sync Markets and retry."
+                "Maker connection dropped"
             lower.contains("tor") && lower.contains("connect") ->
                 "Tor connection failed"
             lower.contains("timeout") ->

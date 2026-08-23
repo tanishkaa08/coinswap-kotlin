@@ -85,7 +85,7 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
                         errorMessage = listOfNotNull(
                             "On-chain history paused while a swap is running",
                             swapsError,
-                        ).joinToString(" • "),
+                        ).joinToString(" / "),
                     )
                 }
                 return@launch
@@ -96,7 +96,7 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update {
                         it.copy(
                             isLoadingTxs = false,
-                            errorMessage = listOfNotNull(e.message, swapsError).joinToString(" • "),
+                            errorMessage = listOfNotNull(e.message, swapsError).joinToString(" / "),
                         )
                     }
                     return@launch
@@ -117,7 +117,7 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
                             errorMessage = listOfNotNull(
                                 "Wallet transactions timed out",
                                 swapsError,
-                            ).joinToString(" • "),
+                            ).joinToString(" / "),
                         )
                     }
                 }
@@ -137,7 +137,7 @@ class WalletHistoryViewModel(app: Application) : AndroidViewModel(app) {
                             errorMessage = listOfNotNull(
                                 timed.exceptionOrNull()?.message,
                                 swapsError,
-                            ).joinToString(" • "),
+                            ).joinToString(" / "),
                         )
                     }
                 }

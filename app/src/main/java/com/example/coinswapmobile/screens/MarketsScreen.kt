@@ -111,7 +111,7 @@ fun MarketsScreen(marketsViewModel: MarketsViewModel = viewModel()) {
                             marketsViewModel.refreshTorStatus()
                             if (!OrbotHelper.isOrbotInstalled(context)) {
                                 marketsViewModel.promptOrbotFromUi(
-                                    "Install Orbot to reach makers over Tor.",
+                                    "Install Orbot",
                                 )
                             }
                         }

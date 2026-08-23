@@ -35,7 +35,6 @@ import com.example.coinswapmobile.components.SectionCard
 import com.example.coinswapmobile.components.SectionLabel
 import com.example.coinswapmobile.components.coinswapTextFieldColors
 import com.example.coinswapmobile.data.CoinswapRepository
-import com.example.coinswapmobile.data.MakerRoutePrefs
 import com.example.coinswapmobile.ui.theme.*
 import com.example.coinswapmobile.service.SwapForegroundService
 import com.example.coinswapmobile.data.TorManager
@@ -76,9 +75,9 @@ private enum class NetworkFee(
     val satPerVbyte: Int,
     val description: String
 ) {
-    LOW(   "Low",    1, "1 sat/vB  •  60 min"),
-    MEDIUM("Medium", 2, "2 sat/vB  •  20 min"),
-    HIGH(  "High",   4, "4 sat/vB  •  10 min"),
+    LOW(   "Low",    1, "1 sat/vB"),
+    MEDIUM("Medium", 2, "2 sat/vB"),
+    HIGH(  "High",   4, "4 sat/vB"),
 }
 
 private const val TX_VBYTES = 225L
@@ -119,33 +118,23 @@ fun SwapScreen(
     val swapTotal    = remember(swapUtxos) { swapUtxos.sumOf { it.amountSats } }
 
     LaunchedEffect(vmState.isSwapping, vmState.lastSwapId, vmState.swapError) {
-        if (swapState != SwapState.IN_PROGRESS && swapState != SwapState.DONE) return@LaunchedEffect
         when {
-            vmState.lastSwapId != null && !vmState.isSwapping && vmState.swapError == null ->
+            // Always show progress UI when a swap is running (covers confirm race + resume).
+            vmState.isSwapping && swapState != SwapState.DONE ->
+                swapState = SwapState.IN_PROGRESS
+            vmState.lastSwapId != null && !vmState.isSwapping && vmState.swapError == null &&
+                (swapState == SwapState.IN_PROGRESS || swapState == SwapState.DONE) ->
                 swapState = SwapState.DONE
-            // Stay on overlay so user can Recover / Done; failed is derived from swapError.
-            !vmState.isSwapping && vmState.swapError != null && swapState == SwapState.IN_PROGRESS -> Unit
-        }
-    }
-
-    // If ViewModel cleared error while overlay was open after a soft cancel, drop overlay.
-    LaunchedEffect(vmState.swapError, vmState.isSwapping, vmState.lastSwapId) {
-        if (swapState == SwapState.IN_PROGRESS &&
-            !vmState.isSwapping &&
-            vmState.swapError == null &&
-            vmState.lastSwapId == null
-        ) {
-            swapState = SwapState.IDLE
+            // Keep failed overlay open until user taps Close / Recover.
+            !vmState.isSwapping && vmState.swapError != null && swapState == SwapState.IN_PROGRESS ->
+                Unit
         }
     }
 
     val amountSatsLong = amountSats.toLongOrNull() ?: 0L
     val makerCount = FIXED_MAKER_COUNT
     val txCount = FIXED_TX_COUNT
-    // Match ViewModel: only hard-excludes are hidden; soft demotes still show as online.
-    val routeableMakers = allMakers.filter {
-        !MakerRoutePrefs.isHardExcluded(it.onionAddress)
-    }
+    val routeableMakers = allMakers
     val onlineMakers = routeableMakers.filter { it.online }
     val eligibleMakers = routeableMakers.filter {
         CoinswapRepository.makerFitsAmount(
@@ -336,22 +325,16 @@ fun SwapScreen(
             && receiveAmtSats > 0L
 
         val validationMessage: String? = when {
-            vmState.isSwapping -> "A swap is already running"
+            vmState.isSwapping -> "Swap already running"
             amountSatsLong <= 0 -> "Enter an amount"
             amountSatsLong < CoinswapRepository.MIN_SWAP_SATS -> "Minimum 100,000 sats"
             onlineMakers.size < makerCount ->
-                "Need $makerCount online makers (Markets shows ${onlineMakers.size}). Sync Markets first."
+                "Need $makerCount online makers"
             eligibleMakers.size < makerCount ->
-                "Need $makerCount makers that accept this amount " +
-                    "(${eligibleMakers.size} fit, ${onlineMakers.size} online). " +
-                    if (swappableSats > 0L && amountSatsLong > swappableSats) {
-                        "Try USE MAX (%,d sats) or a smaller amount.".format(swappableSats)
-                    } else {
-                        "Try a smaller amount or USE MAX."
-                    }
+                "Need $makerCount makers for this amount"
             !fundsOk ->
-                "Need ${formatSats(amountSatsLong + CoinswapRepository.SWAP_PREPARE_RESERVE_SATS)} sats in one coin pool (includes fee reserve)"
-            receiveAmtSats <= 0L -> "Fees exceed swap amount"
+                "Need ${formatSats(amountSatsLong + CoinswapRepository.SWAP_PREPARE_RESERVE_SATS)} sats available"
+            receiveAmtSats <= 0L -> "Fees exceed amount"
             else -> null
         }
 
@@ -415,7 +398,6 @@ fun SwapScreen(
             receiveSats   = if (receiveAmtSats > 0) receiveAmtSats else 0L,
             manualCoins   = 0,
             onConfirm     = {
-                swapViewModel.clearSwapResult()
                 swapState = SwapState.IN_PROGRESS
                 swapViewModel.beginSwap(
                     amountSats      = amountSatsLong,
@@ -461,7 +443,7 @@ fun SwapScreen(
 
     OrbotRequiredDialog(
         visible = showOrbotDialog,
-        reason = "Keep Orbot running with SocksPort 9050. All traffic uses Orbot only.",
+        reason = "Start Orbot with SocksPort 9050.",
         onDismiss = { showOrbotDialog = false },
         onOpened = {
             scope.launch { swapViewModel.loadWalletData() }
@@ -799,7 +781,7 @@ private fun SwapProgressOverlay(
                 Text(if (stage == SwapStage.PREPARING) "Preparing Swap" else "Swap in Progress",
                     style = MaterialTheme.typography.titleMedium,
                     color = TextPrimary)
-                Text("${formatSats(amountSats)} sats · $makerCount makers",
+                Text("${formatSats(amountSats)} sats / $makerCount makers",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     textAlign = TextAlign.Center)

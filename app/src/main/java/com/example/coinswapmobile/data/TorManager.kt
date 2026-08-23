@@ -156,10 +156,7 @@ object TorManager {
     private suspend fun checkExternalOrbotReady(): PortStatus {
         val socks = checkSocks(timeoutMs = 2_000)
         if (!socks.reachable) {
-            return socks.copy(
-                message = "Orbot SOCKS not on 9050 — open Orbot, start Tor/VPN, " +
-                    "enable “Open Proxy on Localhost” (SocksPort 9050), then retry.",
-            )
+            return socks.copy(message = "Orbot SOCKS not on 9050")
         }
         val control = checkControl(timeoutMs = 1_200)
         return PortStatus(

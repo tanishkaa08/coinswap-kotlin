@@ -1,0 +1,168 @@
+maker map: {'dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion': ('127.0.0.1', 26102), '2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion': ('127.0.0.1', 26103), 'cqx23tpuwbe5g2m6mzoeh3k6ujq4bi27z5gpxemeguogpvx2lbk5l6yd.onion': ('127.0.0.1', 26102), '2hbgwujldua7jjhzb56yjhrrn5nqnurp7cbmdiw536cg46wb2mx4h6qd.onion': ('127.0.0.1', 26103)}
+SOCKS5 127.0.0.1:19050 (no sticky reuse)
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.00s up=0 down=0
+EOF from taker after 0.00s up=0 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 1.56s up=152 down=676
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.11s up=150 down=676
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.06s up=17 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.10s up=644 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 5.21s up=67 down=53
+EOF from taker after 5.13s up=67 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 2.67s up=1193 down=1387
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.10s up=642 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.00s up=307 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 5.42s up=17 down=53
+EOF from taker after 5.03s up=17 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.06s up=17 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.09s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.08s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.09s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.09s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.09s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.08s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.01s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.02s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.02s up=1194 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from maker after 0.02s up=1194 down=53
+error: closed
+error: closed
+error: closed
+error: closed
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.07s up=32 down=604
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.07s up=32 down=604
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.07s up=32 down=604
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.12s up=32 down=604
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.01s up=0 down=0
+EOF from taker after 0.00s up=0 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.15s up=152 down=676
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.11s up=150 down=676
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.09s up=17 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.08s up=644 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 915.97s up=817 down=53
+EOF from taker after 915.88s up=817 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 4.77s up=1193 down=1385
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.01s up=648 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.00s up=307 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 15.31s up=67 down=53
+EOF from taker after 15.22s up=67 down=53
+error: closed
+error: closed
+error: closed
+error: closed
+error: closed
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.10s up=32 down=604
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.14s up=32 down=604
+error: closed
+error: closed
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.00s up=0 down=0
+EOF from taker after 0.00s up=0 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.15s up=152 down=676
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.17s up=150 down=676
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.01s up=17 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.09s up=647 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 5.19s up=67 down=53
+EOF from taker after 5.10s up=67 down=53
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 4.97s up=1190 down=1384
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.01s up=642 down=167
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.00s up=307 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 15.16s up=67 down=53
+EOF from taker after 15.13s up=67 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.08s up=17 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 4.54s up=1189 down=1386
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.03s up=355 down=166
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.00s up=307 down=0
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 15.23s up=67 down=53
+EOF from taker after 15.14s up=67 down=53
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.09s up=355 down=166
+CONNECT dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion:21 -> direct 127.0.0.1:26102
+EOF from taker after 0.15s up=158 down=197
+CONNECT 2uepeirzgblpshvyglvrfevxzyqyw6unbvns6cj3wmk7dbcceb4zp4id.onion:21 -> direct 127.0.0.1:26103
+EOF from taker after 0.08s up=161 down=196
+error: closed

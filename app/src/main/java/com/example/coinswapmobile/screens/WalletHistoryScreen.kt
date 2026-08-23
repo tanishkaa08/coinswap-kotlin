@@ -163,7 +163,7 @@ private fun SwapCard(swap: SwapReportUiModel) {
         if (swap.makerCount > 0) add("${swap.makerCount} makers")
         if (swap.totalFeeSats > 0) add("%,d fee".format(swap.totalFeeSats))
         if (timeLabel != null) add(timeLabel)
-    }.joinToString(" · ")
+    }.joinToString(" / ")
 
     Row(
         modifier = Modifier
@@ -184,7 +184,7 @@ private fun SwapCard(swap: SwapReportUiModel) {
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                text = if (swap.amountSats > 0) "%,d sats".format(swap.amountSats) else "—",
+                text = if (swap.amountSats > 0) "%,d sats".format(swap.amountSats) else "-",
                 style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary,
                 maxLines = 1,
@@ -236,7 +236,7 @@ private fun TxRow(tx: TxUiModel) {
     val meta = buildList {
         if (timeLabel != null) add(timeLabel)
         if (tx.confirmed) add("${tx.confirmations} conf") else add("Pending")
-    }.joinToString(" · ")
+    }.joinToString(" / ")
 
     Row(
         modifier = Modifier

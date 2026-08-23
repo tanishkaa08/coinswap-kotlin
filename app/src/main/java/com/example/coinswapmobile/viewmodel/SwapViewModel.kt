@@ -82,11 +82,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                         preparedSwap = if (event.completed || event.failed) null else it.preparedSwap,
                     )
                 }
-                // Only demote after a real on-chain attempt (has swapId), never on
-                // prep/validation failures — those used to ban good makers.
-                if (event.failed && !event.swapId.isNullOrBlank()) {
-                    demoteLastFailedMaker()
-                }
                 if (event.completed || event.failed) {
                     nativeSwapStarted = false
                     loadWalletData()
@@ -206,17 +201,41 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
         makerIds: List<String> = emptyList(),
         protocol: String = session.config.protocol,
     ) {
-        if (_state.value.isSwapping || SwapExecutionBus.active.value) return
+        if (_state.value.isSwapping || SwapExecutionBus.active.value) {
+            // Already running — keep UI on the progress path instead of no-op.
+            _state.update {
+                it.copy(
+                    isSwapping = true,
+                    swapPhase = it.swapPhase ?: "Swap in progress…",
+                    swapError = null,
+                )
+            }
+            return
+        }
         beginJob?.cancel()
         nativeSwapStarted = false
         beginJob = viewModelScope.launch {
-            // Fresh attempt — wipe sticky Stopped / prior error from the form.
+            // Mark running immediately so the progress overlay cannot race back to IDLE
+            // while Tor / maker checks are still in flight.
             _state.update {
-                it.copy(swapError = null, swapPhase = null, lastSwapId = null, preparedSwap = null)
+                it.copy(
+                    isSwapping = true,
+                    swapError = null,
+                    swapPhase = "Starting…",
+                    lastSwapId = null,
+                    preparedSwap = null,
+                )
             }
+            SwapExecutionBus.emit(
+                SwapExecutionBus.Event(
+                    swapId = null,
+                    phase = "Starting…",
+                    isRunning = true,
+                ),
+            )
             val tor = TorManager.ensureRunning(getApplication())
             if (!tor.reachable) {
-                failSwap("Tor SOCKS required for swaps: ${tor.message}", demote = false)
+                failSwap(tor.message.ifBlank { "Orbot SOCKS required" }, demote = false)
                 return@launch
             }
             // Fresh Orbot circuit before maker probes / PoF (best-effort).
@@ -249,11 +268,11 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 return@launch
             }
-            _state.update { it.copy(isSwapping = true, swapError = null, swapPhase = "Syncing wallet…") }
+            _state.update { it.copy(swapPhase = "Syncing…") }
             SwapExecutionBus.emit(
                 SwapExecutionBus.Event(
                     swapId = null,
-                    phase = "Syncing wallet…",
+                    phase = "Syncing…",
                     isRunning = true,
                 ),
             )
@@ -277,7 +296,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
             val bestPool = maxOf(regularPool, swapPool)
             if (!CoinswapRepository.poolCanFundSwap(bestPool, amountSats)) {
                 failSwap(
-                    "Need ${CoinswapRepository.SWAP_PREPARE_RESERVE_SATS} extra sats in one coin pool for mining fees",
+                    "Need ${CoinswapRepository.SWAP_PREPARE_RESERVE_SATS} extra sats for fees",
                     demote = false,
                 )
                 return@launch
@@ -295,16 +314,16 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _state.update { it.copy(swapPhase = "Checking makers…") }
+            val appCtx = getApplication<Application>()
             fun eligible(makers: List<com.example.coinswapmobile.model.MakerUiModel>) =
                 makers.filter { m ->
-                    !MakerRoutePrefs.isHardExcluded(m.onionAddress) &&
-                        CoinswapRepository.makerFitsAmount(
-                            online = m.online,
-                            minSats = m.minSats,
-                            maxSats = m.maxSats,
-                            liquiditySats = m.liquiditySats,
-                            amountSats = amountSats,
-                        )
+                    CoinswapRepository.makerFitsAmount(
+                        online = m.online,
+                        minSats = m.minSats,
+                        maxSats = m.maxSats,
+                        liquiditySats = m.liquiditySats,
+                        amountSats = amountSats,
+                    )
                 }
 
             var makers = coinswapRepo.listMakers().getOrElse { e ->
@@ -316,7 +335,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                     coinswapRepo.syncOfferbook()
                 }
                 if (offerSync == null) {
-                    _state.update { it.copy(swapPhase = "Maker check timed out — using cache…") }
+                    _state.update { it.copy(swapPhase = "Using maker cache…") }
                 } else if (offerSync.isFailure) {
                     failSwap(
                         offerSync.exceptionOrNull()?.message
@@ -334,46 +353,36 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
                 val online = makers.count { it.online }
                 val fit = eligible(makers).size
                 failSwap(
-                    "Need $makerCount makers for this amount " +
-                        "($fit fit / $online online). Sync Markets or try a smaller amount.",
+                    "Need $makerCount makers ($fit fit / $online online)",
                     demote = false,
                 )
                 return@launch
             }
 
-            MakerRoutePrefs.ensureHardExcludes(getApplication())
-            _state.update { it.copy(swapPhase = "Probing makers over Orbot…") }
+            _state.update { it.copy(swapPhase = "Probing makers…") }
             val eligibleList = eligible(makers)
             val fidelity = eligibleList.associate { m ->
                 (MakerRoutePrefs.normalize(m.onionAddress) ?: m.onionAddress) to m.fidelityBondBtc
             }
-            // Probe a wide pool, but never permanently demote on a single SOCKS miss
-            // (Orbot circuits flap; that used to shrink "good" and pad flaky spares).
-            val probePool = MakerRoutePrefs.orderPreferred(
-                context = getApplication(),
+            val candidates = MakerRoutePrefs.orderPreferred(
+                context = appCtx,
                 onions = eligibleList.map { it.onionAddress },
                 needed = (makerCount + 4).coerceAtLeast(5),
                 fidelityByOnion = fidelity,
             )
-            if (probePool.size < makerCount) {
-                failSwap(
-                    "Need $makerCount reliable makers (have ${probePool.size} after excluding known-bad). " +
-                        "Sync Markets and retry.",
-                    demote = false,
-                )
-                return@launch
-            }
-            val reachable = MakerOnionProbe.reachableOnions(probePool)
+            // Prefer SOCKS-reachable onions, but never shrink below the online pool —
+            // a flaky probe must not block swaps when Markets already shows makers.
+            val reachable = MakerOnionProbe.reachableOnions(candidates)
+            val routePool = if (reachable.size >= makerCount) reachable else candidates
             val preferred = MakerRoutePrefs.orderPreferred(
-                context = getApplication(),
-                onions = reachable,
-                needed = (makerCount + 2).coerceAtLeast(3),
+                context = appCtx,
+                onions = routePool,
+                needed = (makerCount + 3).coerceAtLeast(4),
                 fidelityByOnion = fidelity,
             )
             if (preferred.size < makerCount) {
                 failSwap(
-                    "Only ${preferred.size} reachable good makers (need $makerCount). " +
-                        "Keep Orbot on, Sync Markets, retry.",
+                    "Only ${preferred.size} makers available (need $makerCount)",
                     demote = false,
                 )
                 return@launch
@@ -420,8 +429,7 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * @param demote unused — demotion is driven only by [SwapExecutionBus] events
-     * that carry a real swapId (on-chain attempt). Prep failures must not ban makers.
+     * @param demote unused. Makers are never banned by the app.
      */
     private fun failSwap(message: String?, demote: Boolean = false) {
         @Suppress("UNUSED_PARAMETER")
@@ -441,44 +449,6 @@ class SwapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearSwapResult() {
         _state.update { it.copy(swapError = null, swapPhase = null, lastSwapId = null) }
-    }
-
-    /**
-     * Demote the first hop on the latest failed route — that is the maker that
-     * usually drops ProofOfFunding (UnexpectedEof) after funding confirms.
-     * Also soft-demote the last hop when the route had multiple makers.
-     */
-    private fun demoteLastFailedMaker() {
-        viewModelScope.launch {
-            val app = getApplication<Application>()
-            MakerRoutePrefs.ensureHardExcludes(app)
-            val reportFile = java.io.File(
-                FfiEnv.takerDataDir(app),
-                "wallets/taker-signet_swap_report.json",
-            )
-            runCatching {
-                val root = org.json.JSONObject(reportFile.readText())
-                val arr = root.optJSONArray("taker") ?: return@runCatching
-                var bestFirst: String? = null
-                var bestLast: String? = null
-                var bestTs = -1L
-                for (i in 0 until arr.length()) {
-                    val o = arr.getJSONObject(i)
-                    if (!o.optString("status").contains("Fail", ignoreCase = true)) continue
-                    val ts = o.optLong("end_timestamp", o.optLong("start_timestamp", 0L))
-                    if (ts < bestTs) continue
-                    val makers = o.optJSONArray("maker_addresses") ?: continue
-                    if (makers.length() == 0) continue
-                    bestTs = ts
-                    bestFirst = makers.optString(0).takeIf { it.isNotBlank() }
-                    bestLast = makers.optString(makers.length() - 1).takeIf { it.isNotBlank() }
-                }
-                bestFirst?.let { MakerRoutePrefs.demote(app, it) }
-                if (bestLast != null && bestLast != bestFirst) {
-                    MakerRoutePrefs.demote(app, bestLast)
-                }
-            }
-        }
     }
 
     private fun poolOf(spendType: String?): String =

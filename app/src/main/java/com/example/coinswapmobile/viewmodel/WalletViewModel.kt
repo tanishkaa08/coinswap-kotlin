@@ -198,7 +198,7 @@ class WalletViewModel(app: Application) : AndroidViewModel(app) {
         fidelitySats = state.fidelitySats,
         rpcLabel = electrumUrl,
         walletName = walletName,
-        backendLabel = "Electrum • $electrumUrl",
+        backendLabel = "Electrum / $electrumUrl",
         utxos = state.utxos,
         libraryLoadStatus = repo.libraryLoadStatus,
     )

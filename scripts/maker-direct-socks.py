@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """SOCKS5 on :19050 that sends known maker onions to local TCP, not Tor.
 
-After the funding wait the taker drops the maker socket and opens a new one
-for ProofOfFunding. That new socket is closed by route_heartbeat before the
-message lands. Keep the maker TCP for a few seconds and reuse it so PoF
-arrives on the connection the maker still has in the wait state.
+Do not park/reuse maker TCP across SOCKS sessions. The taker drops keepalive
+sockets and reconnects with a fresh Hello for ProofOfFunding and each hop.
+Reusing the old TCP leaves the maker in AwaitingOfferRequest, so Hello fails
+with UnexpectedEof ("failed to fill whole buffer").
 """
 from __future__ import annotations
 
@@ -13,14 +13,10 @@ import socket
 import struct
 import subprocess
 import threading
-import time
 
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = 19050
 TOR_SOCKS = ("127.0.0.1", 9050)
-STICKY_SECS = 20.0
-# Only park sockets that lived through an idle confirm wait. Negotiate
-# reconnects in <1s; reusing that half-closed TCP makes contract exchange EOF.
 
 MAKERS = {
     "dmgfn254q2onz655em4kla2nncvnp4pqmh3fdgvh35km7zkh7yscz4id.onion": ("127.0.0.1", 26102),
@@ -29,9 +25,6 @@ MAKERS = {
     "cqx23tpuwbe5g2m6mzoeh3k6ujq4bi27z5gpxemeguogpvx2lbk5l6yd.onion": ("127.0.0.1", 26102),
     "2hbgwujldua7jjhzb56yjhrrn5nqnurp7cbmdiw536cg46wb2mx4h6qd.onion": ("127.0.0.1", 26103),
 }
-
-_park_lock = threading.Lock()
-_parked: dict[str, tuple[socket.socket, float]] = {}
 
 
 def refresh_onions() -> None:
@@ -82,46 +75,8 @@ def _close(sock: socket.socket | None) -> None:
         pass
 
 
-def _alive(sock: socket.socket) -> bool:
-    try:
-        sock.setblocking(False)
-        try:
-            data = sock.recv(1, socket.MSG_PEEK)
-            return bool(data)
-        except BlockingIOError:
-            return True
-        finally:
-            sock.setblocking(True)
-    except OSError:
-        return False
-
-
-def take_parked(dest: str) -> socket.socket | None:
-    with _park_lock:
-        item = _parked.pop(dest, None)
-    if item is None:
-        return None
-    sock, expiry = item
-    if time.time() <= expiry and _alive(sock):
-        print(f"REUSE parked {dest}", flush=True)
-        return sock
-    _close(sock)
-    return None
-
-
-def park(dest: str, sock: socket.socket) -> None:
-    with _park_lock:
-        old = _parked.pop(dest, None)
-        _parked[dest] = (sock, time.time() + STICKY_SECS)
-    if old:
-        _close(old[0])
-    print(f"PARK {dest} for {STICKY_SECS:.0f}s", flush=True)
-
-
-def pipe(client: socket.socket, remote: socket.socket, dest: str | None) -> None:
-    parked = False
-    started = time.time()
-    tag = (dest or "?")[:12]
+def pipe(client: socket.socket, remote: socket.socket) -> None:
+    started = __import__("time").time()
     up = down = 0
     try:
         while True:
@@ -135,32 +90,21 @@ def pipe(client: socket.socket, remote: socket.socket, dest: str | None) -> None
                         up += len(data)
                     else:
                         down += len(data)
-                if not data:
-                    # Which side hung up is the whole diagnosis when a swap phase
-                    # aborts: a maker EOF with bytes sent up means the maker
-                    # rejected the message, not that the relay dropped it.
+                    dst = remote if src is client else client
+                    dst.sendall(data)
+                else:
                     print(
-                        f"[{tag}] EOF from {'taker' if src is client else 'maker'}"
-                        f" after {time.time() - started:.2f}s up={up} down={down}",
+                        f"EOF from {'taker' if src is client else 'maker'}"
+                        f" after {__import__('time').time() - started:.2f}s"
+                        f" up={up} down={down}",
                         flush=True,
                     )
-                    # After the funding confirm wait the taker drops SOCKS and
-                    # reconnects for ProofOfFunding. Park only those long-lived
-                    # sockets; a negotiate close is too short and the maker TCP
-                    # is already done.
-                    if dest and src is client and (time.time() - started) >= 5.0:
-                        park(dest, remote)
-                        parked = True
-                        remote = None
                     return
-                dst = remote if src is client else client
-                dst.sendall(data)
     except OSError:
         pass
     finally:
         _close(client)
-        if not parked:
-            _close(remote)
+        _close(remote)
 
 
 def socks5_connect_tor(dest_host: str, dest_port: int) -> socket.socket:
@@ -210,18 +154,15 @@ def handle(client: socket.socket) -> None:
         dest_port = struct.unpack("!H", recv_exact(client, 2))[0]
 
         direct = MAKERS.get(dest_host)
-        sticky_key = dest_host if direct else None
-        remote = take_parked(dest_host) if sticky_key else None
-        if remote is None:
-            if direct:
-                remote = socket.create_connection(direct, timeout=10)
-                via = f"direct {direct[0]}:{direct[1]}"
-            else:
-                remote = socks5_connect_tor(dest_host, dest_port)
-                via = f"tor {dest_host}:{dest_port}"
-            print(f"CONNECT {dest_host}:{dest_port} -> {via}", flush=True)
+        if direct:
+            remote = socket.create_connection(direct, timeout=10)
+            via = f"direct {direct[0]}:{direct[1]}"
+        else:
+            remote = socks5_connect_tor(dest_host, dest_port)
+            via = f"tor {dest_host}:{dest_port}"
+        print(f"CONNECT {dest_host}:{dest_port} -> {via}", flush=True)
         client.sendall(b"\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00")
-        pipe(client, remote, sticky_key)
+        pipe(client, remote)
     except Exception as exc:
         print(f"error: {exc}", flush=True)
         try:
@@ -237,7 +178,7 @@ def main() -> None:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind((LISTEN_HOST, LISTEN_PORT))
     server.listen(32)
-    print(f"SOCKS5 {LISTEN_HOST}:{LISTEN_PORT}", flush=True)
+    print(f"SOCKS5 {LISTEN_HOST}:{LISTEN_PORT} (no sticky reuse)", flush=True)
     while True:
         client, _ = server.accept()
         threading.Thread(target=handle, args=(client,), daemon=True).start()

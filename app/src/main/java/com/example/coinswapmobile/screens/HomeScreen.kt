@@ -139,7 +139,7 @@ fun HomeScreen(
 
     OrbotRequiredDialog(
         visible = showOrbotDialog,
-        reason = "Start Orbot with SocksPort 9050 for maker and wallet traffic.",
+        reason = "Start Orbot with SocksPort 9050.",
         onDismiss = { showOrbotDialog = false },
         onOpened = {
             scope.launch { walletViewModel.refreshTorStatus() }

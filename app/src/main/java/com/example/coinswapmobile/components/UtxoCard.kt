@@ -38,8 +38,8 @@ fun UtxoCard(utxo: UtxoItem) {
             Text(
                 text = buildString {
                     append(utxo.kind)
-                    if (!utxo.confirmed) append(" · pending")
-                    append(" · ")
+                    if (!utxo.confirmed) append(" pending")
+                    append(" ")
                     append(utxo.id)
                 },
                 style = MaterialTheme.typography.labelSmall,

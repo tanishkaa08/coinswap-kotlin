@@ -173,15 +173,15 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                 it.copy(
                     isSyncing = true,
                     syncStatus = if (listed > 0) {
-                        "Attempt $attempt/$MAX_ORBOT_ATTEMPTS — 0 of $listed online, retrying…"
+                        "$attempt/$MAX_ORBOT_ATTEMPTS: 0 of $listed online"
                     } else {
-                        "Attempt $attempt/$MAX_ORBOT_ATTEMPTS — waiting for Orbot / Nostr…"
+                        "$attempt/$MAX_ORBOT_ATTEMPTS: waiting for Orbot"
                     },
                     errorMessage = if (surfaceErrors) {
                         if (listed > 0) {
-                            "Makers listed but unreachable over Orbot. Retrying…"
+                            "Makers unreachable"
                         } else {
-                            "Still discovering makers. Retrying…"
+                            "Discovering makers"
                         }
                     } else {
                         it.errorMessage
@@ -197,19 +197,14 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                 isSyncing = false,
                 syncExhausted = true,
                 syncStatus = if (listed > 0) {
-                    "Stopped after $MAX_ORBOT_ATTEMPTS attempts — 0 of $listed online"
+                    "0 of $listed online"
                 } else {
-                    "Stopped after $MAX_ORBOT_ATTEMPTS attempts — check Orbot"
+                    "Check Orbot"
                 },
-                errorMessage = "Could not reach makers over Orbot after $MAX_ORBOT_ATTEMPTS tries. " +
-                    "Confirm SocksPort 9050, then Sync.",
+                errorMessage = "Could not reach makers",
             )
         }
-        promptOrbot(
-            "Could not reach makers after $MAX_ORBOT_ATTEMPTS attempts" +
-                (if (listed > 0) " (0 of $listed makers online)." else ".") +
-                " Keep Orbot running with local SocksPort 9050.",
-        )
+        promptOrbot("Could not reach makers. Start Orbot with SocksPort 9050.")
     }
 
     /**
@@ -224,7 +219,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update {
                     it.copy(
                         isSyncing = true,
-                        syncStatus = "Attempt $attempt — waiting for Orbot SOCKS…",
+                        syncStatus = "$attempt: waiting for Orbot",
                         torReachable = false,
                         torStatusMessage = tor.message,
                         errorMessage = if (surfaceErrors) tor.message else it.errorMessage,
@@ -245,7 +240,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update {
                         it.copy(
                             isSyncing = true,
-                            syncStatus = "Attempt $attempt — taker init failed",
+                            syncStatus = "$attempt: init failed",
                             errorMessage = if (surfaceErrors) e.message else it.errorMessage,
                         )
                     }
@@ -259,7 +254,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                         it.copy(
                             makers = cached,
                             isSyncing = true,
-                            syncStatus = "Attempt $attempt — ${cached.count { it.online }} of ${cached.size} online",
+                            syncStatus = "$attempt: ${cached.count { it.online }}/${cached.size} online",
                         )
                     }
                 }
@@ -268,7 +263,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
             _state.update {
                 it.copy(
                     isSyncing = true,
-                    syncStatus = "Attempt $attempt — discovering makers…",
+                    syncStatus = "$attempt: discovering",
                     torReachable = true,
                     torStatusMessage = tor.message,
                     errorMessage = null,
@@ -276,7 +271,7 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             suspend fun pollOnce(label: String, timeoutMs: Long): List<SwapMaker> {
-                _state.update { it.copy(syncStatus = "Attempt $attempt — $label") }
+                _state.update { it.copy(syncStatus = "$attempt: $label") }
                 val deferred = viewModelScope.async {
                     marketRepo.syncOfferbookAndWait(forceClearCache = false)
                 }
@@ -285,26 +280,26 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                 return marketRepo.fetchOffers().getOrElse { _state.value.makers }
             }
 
-            var makers = pollOnce("syncing offerbook…", LIST_SYNC_MS)
+            var makers = pollOnce("syncing", LIST_SYNC_MS)
             if (makers.isEmpty()) {
                 delay(NOSTR_CATCHUP_MS)
-                makers = pollOnce("waiting for Nostr makers…", LIST_SYNC_MS)
+                makers = pollOnce("waiting for makers", LIST_SYNC_MS)
             }
             if (makers.isNotEmpty()) {
                 _state.update {
                     it.copy(
                         makers = makers,
-                        syncStatus = "Attempt $attempt — ${makers.count { it.online }} of ${makers.size} listed",
+                        syncStatus = "$attempt: ${makers.count { it.online }}/${makers.size} listed",
                     )
                 }
             }
 
             _state.update {
-                it.copy(syncStatus = "Attempt $attempt — polling makers over Orbot…")
+                it.copy(syncStatus = "$attempt: polling makers")
             }
             TorManager.requestNewNym(tor.controlPassword)
             delay(1_500)
-            makers = pollOnce("polling makers over Tor…", SYNC_TIMEOUT_MS)
+            makers = pollOnce("polling", SYNC_TIMEOUT_MS)
             val online = makers.count { it.online }
             _state.update {
                 it.copy(
@@ -312,17 +307,13 @@ class MarketsViewModel(app: Application) : AndroidViewModel(app) {
                     isSyncing = online == 0,
                     syncStatus = when {
                         online > 0 -> null
-                        makers.isNotEmpty() ->
-                            "Attempt $attempt — 0 of ${makers.size} online"
-                        else ->
-                            "Attempt $attempt — no makers in offerbook yet"
+                        makers.isNotEmpty() -> "$attempt: 0/${makers.size} online"
+                        else -> "$attempt: no makers yet"
                     },
                     errorMessage = when {
                         online > 0 -> null
-                        surfaceErrors && makers.isNotEmpty() ->
-                            "Makers found but unreachable over Orbot SOCKS."
-                        surfaceErrors && makers.isEmpty() ->
-                            "No makers discovered yet. Keep Markets open."
+                        surfaceErrors && makers.isNotEmpty() -> "Makers unreachable"
+                        surfaceErrors && makers.isEmpty() -> "No makers yet"
                         else -> it.errorMessage
                     },
                 )
