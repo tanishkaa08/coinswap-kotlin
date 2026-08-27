@@ -16,3 +16,18 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Local lab / debug artifacts (never commit)
+_apk_check/
+_*.log
+_*.xml
+_*.png
+_*.cbor
+_*.txt
+_ui_*.xml
+_ui_*.py
+_smoke*.png
+installed-base.apk
+*.apk
+scripts/*.log
+scripts/*.err
