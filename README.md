@@ -82,7 +82,7 @@ Login probes reachable Electrum endpoints and labels the network **Signet** vs *
 
 ## Testing
 
-### A) Signet — no PC dependency
+### A) Signet: no PC dependency
 
 Use this to test against the public network (mentor Electrum + live Tor makers).
 
@@ -99,7 +99,7 @@ Use this to test against the public network (mentor Electrum + live Tor makers).
 
 Plaintext fallback server: `tcp://electrum.citadelfoss.xyz:50001`.
 
-### B) Regtest lab — local electrs + makers (USB)
+### B) Regtest lab : local electrs + makers (USB)
 
 Use this when you need controlled makers / fast confirms.
 
